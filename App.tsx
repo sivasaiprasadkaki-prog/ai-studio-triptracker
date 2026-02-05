@@ -4,8 +4,29 @@ import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
 import { supabase } from './lib/supabase';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Auth from './components/Auth';
 
 const App: React.FC = () => {
+  const { session, loading: authLoading, isPasswordRecovery } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  // Show password reset form when user clicks reset link from email
+  if (isPasswordRecovery) {
+    return <Auth initialView="reset-password" />;
+  }
+
+  if (!session) {
+    return <Auth />;
+  }
+
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [user, setUser] = useState<User | null>(null);
@@ -111,4 +132,11 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+// Wrap App with AuthProvider
+const AppWithAuth = () => (
+  <AuthProvider>
+    <App />
+  </AuthProvider>
+);
+
+export default AppWithAuth;
