@@ -5,7 +5,7 @@ import Header from './Header';
 import LedgerCard from './LedgerCard';
 import LedgerDetails from './LedgerDetails';
 import Modal from './Modal';
-import { Plus, LayoutGrid, List, MapPin, Trash2, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Plus, LayoutGrid, List, Wallet, Trash2, Loader2, Sparkles, ReceiptText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface DashboardProps {
@@ -13,9 +13,10 @@ interface DashboardProps {
   theme: Theme;
   toggleTheme: () => void;
   onLogout: () => void;
+  onUserUpdate: (user: Partial<User>) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogout }) => {
+const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogout, onUserUpdate }) => {
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [activeLedgerId, setActiveLedgerId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
@@ -72,10 +73,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
   const handleCreateLedger = async () => {
     if (!newLedgerName.trim()) return;
-    if (ledgers.length >= 3) {
-      alert("You can only create a maximum of 3 ledgers.");
-      return;
-    }
 
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -112,7 +109,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     if (!deleteConfirmationId) return;
     setIsDeleting(true);
     try {
-      // Step 1: Delete all entries first (to handle foreign key constraints)
       const { error: entriesError } = await supabase
         .from('entries')
         .delete()
@@ -120,7 +116,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
       if (entriesError) throw entriesError;
 
-      // Step 2: Delete the ledger
       const { error: ledgerError } = await supabase
         .from('ledgers')
         .delete()
@@ -128,7 +123,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
       if (ledgerError) throw ledgerError;
 
-      // Step 3: Update local state
       setLedgers(prev => prev.filter(l => l.id !== deleteConfirmationId));
       if (activeLedgerId === deleteConfirmationId) setActiveLedgerId(null);
       setDeleteConfirmationId(null);
@@ -190,7 +184,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   };
 
   const handleDeleteEntry = async (ledgerId: string, entryId: string) => {
-    // Optimistic UI update: remove from local state immediately
     setLedgers(prev => prev.map(l => {
       if (l.id === ledgerId) {
         return { ...l, entries: l.entries.filter(e => e.id !== entryId) };
@@ -207,7 +200,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       if (error) throw error;
     } catch (err: any) {
       console.error('Entry delete error:', err);
-      // If error occurs, re-fetch to restore state consistency
       fetchData();
       alert('Failed to delete entry from cloud. Restoring list...');
     }
@@ -304,6 +296,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         onLogout={onLogout}
+        onUserUpdate={onUserUpdate}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -312,7 +305,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
             <h2 className="text-3xl font-black text-slate-900 dark:text-white flex items-center gap-2">
               Hello, {user.name}! <Sparkles className="w-6 h-6 text-yellow-500 animate-pulse" />
             </h2>
-            <p className="text-slate-500 dark:text-slate-400 font-medium tracking-tight mt-1">Ready for your next adventure?</p>
+            <p className="text-slate-500 dark:text-slate-400 font-medium tracking-tight mt-1">Keep your financial records precise and organized.</p>
           </div>
           
           <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl shadow-inner border border-slate-200 dark:border-slate-700">
@@ -334,10 +327,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         {ledgers.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-8 bg-white dark:bg-slate-800 rounded-[3rem] shadow-xl border border-dashed border-slate-300 dark:border-slate-700">
             <div className="w-24 h-24 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center mb-6 animate-bounce">
-              <MapPin className="w-12 h-12 text-blue-600 dark:text-blue-400" />
+              <Wallet className="w-12 h-12 text-blue-600 dark:text-blue-400" />
             </div>
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">No Ledgers Created</h2>
-            <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-sm">Start by creating your first trip ledger to track your expenses and memories.</p>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">No Ledgers Found</h2>
+            <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-sm">Start tracking your income and expenses by creating your first digital ledger today.</p>
             <button 
               onClick={() => setIsCreateModalOpen(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-5 rounded-3xl font-black shadow-2xl shadow-blue-500/30 flex items-center gap-3 transition-all hover:scale-105 active:scale-95"
@@ -350,17 +343,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           <div className="space-y-8">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-4">
               <div className="flex items-center gap-3">
-                <h2 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-widest">Active Trips</h2>
+                <h2 className="text-xl font-black text-slate-800 dark:text-white uppercase tracking-widest">Financial Ledgers</h2>
                 <span className="text-xs font-bold px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-400">
-                  {ledgers.length} / 3
+                  {ledgers.length} Ledgers
                 </span>
               </div>
               <button 
-                disabled={ledgers.length >= 3}
                 onClick={() => setIsCreateModalOpen(true)}
-                className={`px-6 py-3 rounded-2xl font-black transition-all flex items-center gap-2 shadow-xl active:scale-95 ${ledgers.length >= 3 ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20'}`}
+                className="px-6 py-3 rounded-2xl font-black transition-all flex items-center gap-2 shadow-xl bg-blue-600 text-white hover:bg-blue-700 shadow-blue-500/20 active:scale-95"
               >
-                {ledgers.length >= 3 ? 'Limit Reached' : <><Plus className="w-5 h-5" /> New Trip</>}
+                <Plus className="w-5 h-5" /> New Ledger
               </button>
             </div>
             
@@ -377,8 +369,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
               ))}
               {filteredLedgers.length === 0 && (
                 <div className="col-span-full py-20 text-center">
-                  <div className="text-slate-400 font-bold text-lg mb-2">Oops! No trips found</div>
-                  <p className="text-slate-500 text-sm">Try searching for something else.</p>
+                  <div className="text-slate-400 font-bold text-lg mb-2">No results matching your search</div>
+                  <p className="text-slate-500 text-sm">Try searching for a different ledger name.</p>
                 </div>
               )}
             </div>
@@ -391,20 +383,20 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           <div className="mb-6">
             <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3">Ledger Name</label>
             <div className="relative">
-               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
+               <ReceiptText className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
                <input 
                 autoFocus
                 type="text" 
                 value={newLedgerName}
                 onChange={(e) => setNewLedgerName(e.target.value)}
                 className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 dark:bg-slate-900 dark:text-white border-slate-100 dark:border-slate-700 outline-none focus:border-blue-500 transition-all shadow-inner"
-                placeholder="e.g. Europe 2024"
+                placeholder="e.g. Monthly Savings"
               />
             </div>
           </div>
           <div className="flex gap-4">
             <button onClick={() => setIsCreateModalOpen(false)} className="flex-1 px-4 py-4 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">Cancel</button>
-            <button onClick={handleCreateLedger} className="flex-1 px-4 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all">Create Trip</button>
+            <button onClick={handleCreateLedger} className="flex-1 px-4 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all">Create Ledger</button>
           </div>
         </div>
       </Modal>
@@ -415,7 +407,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
             <Trash2 className="w-10 h-10 text-red-600" />
           </div>
           <h4 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Delete Ledger?</h4>
-          <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">This action cannot be undone. All transactions in this ledger will be permanently deleted from the cloud.</p>
+          <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">This action cannot be undone. All transactions and financial records in this ledger will be permanently deleted from the cloud.</p>
           <div className="flex gap-4">
             <button 
               disabled={isDeleting}
@@ -429,7 +421,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
               onClick={confirmDelete} 
               className="flex-1 px-4 py-4 rounded-2xl bg-red-600 text-white font-black hover:bg-red-700 transition-all shadow-xl shadow-red-500/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Yes, Delete Trip'}
+              {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Yes, Delete Ledger'}
             </button>
           </div>
         </div>

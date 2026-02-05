@@ -75,6 +75,10 @@ const App: React.FC = () => {
     await supabase.auth.signOut();
   };
 
+  const handleUserUpdate = (updatedUser: Partial<User>) => {
+    setUser(prev => prev ? { ...prev, ...updatedUser } : null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors">
@@ -101,6 +105,7 @@ const App: React.FC = () => {
         theme={theme} 
         toggleTheme={toggleTheme} 
         onLogout={handleLogout}
+        onUserUpdate={handleUserUpdate}
       />
     </div>
   );

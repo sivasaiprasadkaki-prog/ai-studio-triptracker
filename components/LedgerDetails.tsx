@@ -6,7 +6,7 @@ import {
   PlusCircle, MinusCircle, ChevronDown, Paperclip, X, 
   Image as ImageIcon, Edit2, Trash2, FileText, Download,
   IndianRupee, Eye, CheckSquare, Square, ArrowUp, ArrowDown,
-  ZoomIn, ZoomOut, RotateCcw, UploadCloud
+  ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, AlertCircle
 } from 'lucide-react';
 import Modal from './Modal';
 import { jsPDF } from 'jspdf';
@@ -42,6 +42,10 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   const [editingEntry, setEditingEntry] = useState<Entry | null>(null);
   const [galleryEntry, setGalleryEntry] = useState<Entry | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // Custom delete confirmation states
+  const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const tableData = useMemo(() => {
     let currentBalance = 0;
@@ -58,21 +62,29 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     return { cashIn, cashOut, net: cashIn - cashOut };
   }, [ledger.entries]);
 
-  const handleIndividualDelete = (e: React.MouseEvent, entryId: string) => {
+  const handleOpenDeleteConfirm = (e: React.MouseEvent, ids: string[]) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (window.confirm('Delete this transaction?')) {
-      onDeleteEntry(ledger.id, entryId);
-      const next = new Set(selectedIds);
-      next.delete(entryId);
-      setSelectedIds(next);
-    }
+    setDeleteIds(ids);
   };
 
-  const handleBulkDeleteAction = () => {
-    if (selectedIds.size === 0) return;
-    if (window.confirm(`Delete ${selectedIds.size} selected entries?`)) {
-      onBulkDelete(Array.from(selectedIds));
-      setSelectedIds(new Set());
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      if (deleteIds.length === 1) {
+        await onDeleteEntry(ledger.id, deleteIds[0]);
+      } else {
+        await onBulkDelete(deleteIds);
+      }
+      
+      const next = new Set(selectedIds);
+      deleteIds.forEach(id => next.delete(id));
+      setSelectedIds(next);
+      setDeleteIds([]);
+    } catch (err) {
+      console.error("Delete failed:", err);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -104,52 +116,36 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Generated on: ${formatDate(Date.now())}`, 14, 20);
-
-    const tableRows = tableData.map(entry => [
-      `${formatDate(entry.dateTime)}\n${formatTime(entry.dateTime)}`,
-      entry.details,
-      entry.category,
-      entry.mode,
-      entry.type === 'in' ? `+₹${entry.amount.toLocaleString()}` : `-₹${entry.amount.toLocaleString()}`,
-      `₹${entry.balance.toLocaleString()}`
-    ]);
-
-    (doc as any).autoTable({
-      startY: 30,
-      head: [['Date', 'Details', 'Category', 'Mode', 'Amount', 'Balance']],
-      body: tableRows,
-      headStyles: { fillColor: [59, 130, 246], fontSize: 9 },
-      styles: { fontSize: 8, cellPadding: 3 },
-    });
+    // Header information and table (list) removed as per request
+    
+    let isFirstPage = true;
 
     for (const entry of ledger.entries) {
       if (entry.attachments && entry.attachments.length > 0) {
         for (const att of entry.attachments) {
           if (att.data.startsWith('data:image/')) {
-            doc.addPage();
-            doc.setFontSize(10);
-            doc.setTextColor(100, 116, 139);
-            doc.text(`Attachment for: ${entry.details} (${formatDate(entry.dateTime)})`, 14, 15);
+            // Only add a page if it's not the very first image we're adding
+            if (!isFirstPage) {
+              doc.addPage();
+            }
+            isFirstPage = false;
+
             try {
               const imgProps = doc.getImageProperties(att.data);
               const margin = 14;
               const maxImgWidth = pageWidth - (margin * 2);
-              const maxImgHeight = pageHeight - 40; 
+              const maxImgHeight = pageHeight - (margin * 2); 
               const ratio = Math.min(maxImgWidth / imgProps.width, maxImgHeight / imgProps.height);
               const finalWidth = imgProps.width * ratio;
               const finalHeight = imgProps.height * ratio;
-              doc.addImage(att.data, 'JPEG', margin, 25, finalWidth, finalHeight);
-              const overlayY = 25 + finalHeight - 15;
-              doc.setFillColor(0, 0, 0);
-              doc.setGState(new (doc as any).GState({ opacity: 0.15 })); 
-              doc.rect(margin, overlayY, finalWidth, 15, 'F');
-              doc.setGState(new (doc as any).GState({ opacity: 1.0 }));
-              doc.setTextColor(255, 255, 255);
-              doc.setFontSize(8);
-              doc.text(`${entry.details} | ₹${entry.amount.toLocaleString()}`, margin + 5, overlayY + 9);
+              
+              // Center the image on the page
+              const xPos = (pageWidth - finalWidth) / 2;
+              const yPos = (pageHeight - finalHeight) / 2;
+              
+              doc.addImage(att.data, 'JPEG', xPos, yPos, finalWidth, finalHeight);
+              
+              // Overlay and identifying text removed as requested
             } catch (err) {
               console.error("PDF Export Image Error:", err);
             }
@@ -157,13 +153,13 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
         }
       }
     }
-    doc.save(`${ledger.name.replace(/\s+/g, '_')}_Report.pdf`);
+
+    // Save strictly the images
+    doc.save(`${ledger.name.replace(/\s+/g, '_')}_Attachments.pdf`);
     setIsReportsOpen(false);
   };
 
   const handleExportExcel = () => {
-    // Exact column layout from reference image:
-    // Date | Details | Category | Mode | Cash In | Cash Out
     const headers = ['Date', 'Details', 'Category', 'Mode', 'Cash In', 'Cash Out'];
     const rows = tableData.map(e => [
       formatDate(e.dateTime),
@@ -174,16 +170,13 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       e.type === 'out' ? e.amount : ''
     ]);
 
-    // Summary footer rows exactly as in user reference:
-    // TOTAL in Mode column (D), values in E and F
-    // BALANCE in Mode column (D), net in E
     const totalRow = ["", "", "", "TOTAL", stats.cashIn, stats.cashOut];
     const balanceRow = ["", "", "", "BALANCE", stats.net, ""];
 
     const csvContent = [
       headers,
       ...rows,
-      [""], // Spacing row
+      [""],
       totalRow,
       balanceRow
     ].map(e => e.join(",")).join("\n");
@@ -201,7 +194,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors pb-20">
       <nav className="sticky top-0 z-50 bg-white/95 dark:bg-slate-800/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-700 h-16 flex items-center justify-between px-4 sm:px-8 shadow-sm">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-600 dark:text-slate-300">
+          <button type="button" onClick={onBack} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors text-slate-600 dark:text-slate-300">
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="text-xl font-black text-slate-900 dark:text-white truncate max-w-[150px] sm:max-w-none">
@@ -211,15 +204,17 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
         <div className="flex items-center gap-3">
           {selectedIds.size > 0 && (
             <button 
-              onClick={handleBulkDeleteAction}
+              type="button"
+              onClick={(e) => handleOpenDeleteConfirm(e, Array.from(selectedIds))}
               className="px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-xs flex items-center gap-2 hover:bg-red-600 active:scale-95 transition-all shadow-lg"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-4 h-4 pointer-events-none" />
               Delete ({selectedIds.size})
             </button>
           )}
           <div className="relative">
             <button 
+              type="button"
               onClick={() => setIsReportsOpen(!isReportsOpen)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg active:scale-95"
             >
@@ -228,12 +223,12 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
               <ChevronDown className={`w-4 h-4 transition-transform ${isReportsOpen ? 'rotate-180' : ''}`} />
             </button>
             {isReportsOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border py-2 z-20">
-                <button onClick={handleExportExcel} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm flex items-center gap-3 font-medium">
-                  <Download className="w-4 h-4 text-green-500" /> Excel (.csv)
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-700 py-2 z-20">
+                <button type="button" onClick={handleExportExcel} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm flex items-center gap-3 font-medium">
+                  <Download className="w-4 h-4 text-green-500 pointer-events-none" /> Excel (.csv)
                 </button>
-                <button onClick={handleExportPdf} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm flex items-center gap-3 font-medium">
-                  <FileText className="w-4 h-4 text-red-500" /> PDF (.pdf)
+                <button type="button" onClick={handleExportPdf} className="w-full text-left px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-sm flex items-center gap-3 font-medium">
+                  <FileText className="w-4 h-4 text-red-500 pointer-events-none" /> PDF (.pdf)
                 </button>
               </div>
             )}
@@ -250,22 +245,22 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
           </div>
 
           <div className="flex gap-3">
-            <button onClick={() => setEntryModalType('in')} className="flex-1 flex items-center justify-center gap-2 bg-green-500/10 text-green-600 py-3 rounded-2xl font-black border-2 border-green-500/20 active:scale-95 transition-all text-sm">
+            <button type="button" onClick={() => setEntryModalType('in')} className="flex-1 flex items-center justify-center gap-2 bg-green-500/10 text-green-600 py-3 rounded-2xl font-black border-2 border-green-500/20 active:scale-95 transition-all text-sm">
               <PlusCircle className="w-5 h-5" /> Cash In
             </button>
-            <button onClick={() => setEntryModalType('out')} className="flex-1 flex items-center justify-center gap-2 bg-red-500/10 text-red-600 py-3 rounded-2xl font-black border-2 border-red-500/20 active:scale-95 transition-all text-sm">
+            <button type="button" onClick={() => setEntryModalType('out')} className="flex-1 flex items-center justify-center gap-2 bg-red-500/10 text-red-600 py-3 rounded-2xl font-black border-2 border-green-500/20 active:scale-95 transition-all text-sm">
               <MinusCircle className="w-5 h-5" /> Cash Out
             </button>
           </div>
         </div>
 
-        <div className="mt-4 bg-white dark:bg-slate-800 rounded-[2rem] shadow-sm border overflow-hidden">
+        <div className="mt-4 bg-white dark:bg-slate-800 rounded-[2rem] shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse min-w-[850px]">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 border-b">
+              <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                 <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
                   <th className="px-6 py-4 w-12 text-center">
-                    <button onClick={toggleSelectAll} className="p-1">
+                    <button type="button" onClick={toggleSelectAll} className="p-1">
                       {selectedIds.size === ledger.entries.length && ledger.entries.length > 0 ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5" />}
                     </button>
                   </th>
@@ -289,7 +284,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
                   tableData.map((entry, idx) => (
                     <tr key={entry.id} className={`group transition-colors ${selectedIds.has(entry.id) ? 'bg-blue-50/50 dark:bg-blue-900/10' : 'hover:bg-slate-50/50 dark:hover:bg-slate-900/50'}`}>
                       <td className="px-6 py-4 text-center">
-                        <button onClick={() => toggleSelect(entry.id)} className="p-1">
+                        <button type="button" onClick={() => toggleSelect(entry.id)} className="p-1">
                           {selectedIds.has(entry.id) ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5 text-slate-300" />}
                         </button>
                       </td>
@@ -302,24 +297,24 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-800 dark:text-white text-sm">{entry.details}</span>
                           {entry.attachments?.length > 0 && (
-                            <button onClick={() => setGalleryEntry(entry)} className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[9px] font-black">
-                              <Paperclip className="w-2.5 h-2.5" /> {entry.attachments.length}
+                            <button type="button" onClick={() => setGalleryEntry(entry)} className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[9px] font-black">
+                              <Paperclip className="w-2.5 h-2.5 pointer-events-none" /> {entry.attachments.length}
                             </button>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4"><span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-slate-100 text-slate-500 uppercase">{entry.category}</span></td>
+                      <td className="px-6 py-4"><span className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 uppercase">{entry.category}</span></td>
                       <td className="px-6 py-4"><span className="text-xs font-semibold text-slate-400">{entry.mode}</span></td>
                       <td className="px-6 py-4 font-black text-sm"><div className={entry.type === 'in' ? 'text-green-600' : 'text-red-600'}>{entry.type === 'in' ? '+' : '-'}₹{entry.amount.toLocaleString()}</div></td>
                       <td className="px-6 py-4 text-sm font-black text-slate-900 dark:text-slate-200">₹{entry.balance.toLocaleString()}</td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-center gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <div className="flex flex-col gap-0.5 mr-2">
-                            <button onClick={() => moveEntry(idx, 'up')} disabled={idx === 0} className="p-0.5 hover:text-blue-600 disabled:opacity-20"><ArrowUp className="w-3.5 h-3.5"/></button>
-                            <button onClick={() => moveEntry(idx, 'down')} disabled={idx === tableData.length - 1} className="p-0.5 hover:text-blue-600 disabled:opacity-20"><ArrowDown className="w-3.5 h-3.5"/></button>
+                            <button type="button" onClick={() => moveEntry(idx, 'up')} disabled={idx === 0} className="p-0.5 hover:text-blue-600 disabled:opacity-20"><ArrowUp className="w-3.5 h-3.5 pointer-events-none"/></button>
+                            <button type="button" onClick={() => moveEntry(idx, 'down')} disabled={idx === tableData.length - 1} className="p-0.5 hover:text-blue-600 disabled:opacity-20"><ArrowDown className="w-3.5 h-3.5 pointer-events-none"/></button>
                           </div>
-                          <button onClick={() => setEditingEntry(entry)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 className="w-4 h-4" /></button>
-                          <button onClick={(e) => handleIndividualDelete(e, entry.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                          <button type="button" onClick={() => setEditingEntry(entry)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"><Edit2 className="w-4 h-4 pointer-events-none" /></button>
+                          <button type="button" onClick={(e) => handleOpenDeleteConfirm(e, [entry.id])} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"><Trash2 className="w-4 h-4 pointer-events-none" /></button>
                         </div>
                       </td>
                     </tr>
@@ -337,6 +332,34 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
 
       <Modal isOpen={!!editingEntry} onClose={() => setEditingEntry(null)} title="Edit Entry">
         {editingEntry && <EntryForm type={editingEntry.type} initialData={editingEntry} onSave={(e) => { onUpdateEntry(ledger.id, { ...e, id: editingEntry.id }); setEditingEntry(null); }} onCancel={() => setEditingEntry(null)} />}
+      </Modal>
+
+      <Modal isOpen={deleteIds.length > 0} onClose={() => setDeleteIds([])} title="Confirm Delete">
+        <div className="p-8 text-center">
+          <div className="w-20 h-20 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Trash2 className="w-10 h-10 text-red-600" />
+          </div>
+          <h4 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Delete Transaction?</h4>
+          <p className="text-slate-500 dark:text-slate-400 mb-8 font-medium">Are you sure you want to permanently delete {deleteIds.length === 1 ? 'this transaction' : `${deleteIds.length} selected transactions`}? This action cannot be reversed.</p>
+          <div className="flex gap-4">
+            <button 
+              type="button"
+              disabled={isDeleting}
+              onClick={() => setDeleteIds([])} 
+              className="flex-1 px-4 py-4 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button 
+              type="button"
+              disabled={isDeleting}
+              onClick={handleConfirmDelete} 
+              className="flex-1 px-4 py-4 rounded-2xl bg-red-600 text-white font-black hover:bg-red-700 transition-all shadow-xl shadow-red-500/20 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isDeleting ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Yes, Delete'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <GalleryModal isOpen={!!galleryEntry} onClose={() => setGalleryEntry(null)} entry={galleryEntry} />
@@ -387,10 +410,10 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
           {entry.details} • {activeIndex + 1} / {entry.attachments.length}
         </div>
         <div className="flex gap-2">
-          <button onClick={handleZoomIn} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Zoom In"><ZoomIn className="w-5 h-5" /></button>
-          <button onClick={handleZoomOut} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Zoom Out"><ZoomOut className="w-5 h-5" /></button>
-          <button onClick={handleRotate} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Rotate"><RotateCcw className="w-5 h-5" /></button>
-          <button onClick={handleClose} className="p-2 text-white/80 hover:text-white hover:bg-red-500 rounded-full transition-all border border-white/10" title="Close"><X className="w-6 h-6" /></button>
+          <button type="button" onClick={handleZoomIn} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Zoom In"><ZoomIn className="w-5 h-5" /></button>
+          <button type="button" onClick={handleZoomOut} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Zoom Out"><ZoomOut className="w-5 h-5" /></button>
+          <button type="button" onClick={handleRotate} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Rotate"><RotateCcw className="w-5 h-5" /></button>
+          <button type="button" onClick={handleClose} className="p-2 text-white/80 hover:text-white hover:bg-red-500 rounded-full transition-all border border-white/10" title="Close"><X className="w-6 h-6" /></button>
         </div>
       </div>
 
@@ -408,7 +431,7 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
 
         <div className="absolute bottom-8 flex gap-3 overflow-x-auto max-w-[90%] p-3 bg-white/5 rounded-2xl backdrop-blur-md border border-white/10 scrollbar-hide">
           {entry.attachments.map((att, idx) => (
-            <button key={att.id} onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
+            <button key={att.id} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
               <img src={att.data} className="w-full h-full object-cover" alt="" />
             </button>
           ))}
@@ -438,7 +461,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          // Explicitly update attachments state to trigger a re-render of previews
           setAttachments(prev => [...prev, { 
             id: Math.random().toString(36).substr(2, 9), 
             name: file.name, 
@@ -489,7 +511,7 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
           className={`relative border-2 border-dashed rounded-2xl p-8 transition-all flex flex-col items-center justify-center gap-2 group cursor-pointer ${isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'}`}
           onClick={() => fileInputRef.current?.click()}
         >
-          <UploadCloud className={`w-10 h-10 transition-colors ${isDragging ? 'text-blue-500' : 'text-slate-300 group-hover:text-slate-400'}`} />
+          <UploadCloud className={`w-10 h-10 transition-colors ${isDragging ? 'text-blue-500 pointer-events-none' : 'text-slate-300 group-hover:text-slate-400'}`} />
           <p className="text-xs font-bold text-slate-400 group-hover:text-slate-500">Drag & Drop images here or click to upload</p>
           <input type="file" multiple onChange={(e) => e.target.files && handleFiles(e.target.files)} className="hidden" ref={fileInputRef} accept="image/*" />
         </div>
@@ -497,22 +519,22 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
         {attachments.length > 0 && (
           <div className="grid grid-cols-5 gap-2 pt-2 animate-in fade-in slide-in-from-bottom-2">
             {attachments.map((att) => (
-              <div key={att.id} className="relative aspect-square rounded-xl overflow-hidden border group/item shadow-sm bg-slate-100 dark:bg-slate-700">
+              <div key={att.id} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group/item shadow-sm bg-slate-100 dark:bg-slate-700">
                 <img src={att.data} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
                 <button 
                   type="button" 
                   onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter(a => a.id !== att.id)); }} 
                   className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors shadow-md transform hover:scale-110"
                 >
-                  <X className="w-3 h-3"/>
+                  <X className="w-3 h-3 pointer-events-none"/>
                 </button>
               </div>
             ))}
           </div>
         )}
       </div>
-      <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-slate-800 pb-2 border-t mt-4 transition-colors">
-        <button type="button" onClick={onCancel} className="flex-1 py-3 border rounded-xl font-bold active:scale-95 transition-all text-slate-600 dark:text-slate-300">Cancel</button>
+      <div className="flex gap-4 pt-4 sticky bottom-0 bg-white dark:bg-slate-800 pb-2 border-t border-slate-200 dark:border-slate-700 mt-4 transition-colors">
+        <button type="button" onClick={onCancel} className="flex-1 py-3 border border-slate-200 dark:border-slate-700 rounded-xl font-bold active:scale-95 transition-all text-slate-600 dark:text-slate-300">Cancel</button>
         <button type="submit" className={`flex-1 py-3 rounded-xl text-white font-black shadow-lg active:scale-95 transition-all ${activeType === 'in' ? 'bg-green-500 hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'}`}>Save Transaction</button>
       </div>
     </form>
