@@ -1,16 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
 import { supabase } from './lib/supabase';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isRecovering, setIsRecovering] = useState(false);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as Theme;
@@ -18,25 +18,6 @@ const App: React.FC = () => {
       setTheme(savedTheme);
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
     }
-
-    const checkUrlState = () => {
-      const hash = window.location.hash;
-      const params = new URLSearchParams(window.location.search);
-      const pathname = window.location.pathname;
-      
-      // Strict check for recovery markers or the specific route /reset-password
-      const isRecovery = hash.includes('type=recovery') || 
-                         hash.includes('access_token=') || 
-                         params.get('type') === 'recovery' ||
-                         hash.includes('recovery') ||
-                         pathname === '/reset-password';
-                         
-      if (isRecovery) {
-        setIsRecovering(true);
-      }
-    };
-
-    checkUrlState();
 
     // Check current session immediately
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -51,22 +32,18 @@ const App: React.FC = () => {
       setLoading(false);
     });
 
-    // Listen for all auth events
+    // Listen for auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsRecovering(true);
-      } else if (session) {
+      if (session) {
         setUser({
           name: session.user.user_metadata.name || session.user.email?.split('@')[0] || 'Traveler',
           email: session.user.email || '',
           avatar: ''
         });
         setIsLoggedIn(true);
-        setIsRecovering(false); // If we have a session, we are no longer "recovering"
-      } else if (event === 'SIGNED_OUT') {
+      } else {
         setUser(null);
         setIsLoggedIn(false);
-        setIsRecovering(false);
       }
     });
 
@@ -96,38 +73,51 @@ const App: React.FC = () => {
     );
   }
 
-  // If the user is on /reset-password or has a recovery token, show the Update view
-  if (isRecovering) {
-    return (
-      <Login 
-        theme={theme} 
-        toggleTheme={toggleTheme} 
-        initialView="update" 
-      />
-    );
-  }
-
-  // Normal flow: check login status
-  if (!isLoggedIn) {
-    return (
-      <Login 
-        theme={theme} 
-        toggleTheme={toggleTheme} 
-        initialView="login" 
-      />
-    );
-  }
-
   return (
-    <div className={theme}>
-      <Dashboard 
-        user={user!} 
-        theme={theme} 
-        toggleTheme={toggleTheme} 
-        onLogout={handleLogout}
-        onUserUpdate={handleUserUpdate}
+    <Routes>
+      <Route 
+        path="/" 
+        element={
+          isLoggedIn ? (
+            <div className={theme}>
+              <Dashboard 
+                user={user!} 
+                theme={theme} 
+                toggleTheme={toggleTheme} 
+                onLogout={handleLogout}
+                onUserUpdate={handleUserUpdate}
+              />
+            </div>
+          ) : (
+            <Login 
+              theme={theme} 
+              toggleTheme={toggleTheme} 
+              initialView="login" 
+            />
+          )
+        } 
       />
-    </div>
+      <Route 
+        path="/reset-password" 
+        element={
+          <Login 
+            theme={theme} 
+            toggleTheme={toggleTheme} 
+            initialView="update" 
+          />
+        } 
+      />
+      {/* Catch-all route to redirect back to home */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 };
 

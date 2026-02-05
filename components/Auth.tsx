@@ -25,7 +25,7 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Dynamically determine the redirect URL based on current environment
+  // Dynamically generate the redirect URL based on current origin for production safety
   const resetRedirectUrl = `${window.location.origin}/reset-password`;
 
   useEffect(() => {
@@ -80,7 +80,7 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
           throw new Error("Please enter a valid email address.");
         }
 
-        // Use dynamic URL to prevent "Site can't be reached" errors in different environments
+        // Exact Supabase call with dynamic environment-aware redirect
         const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: resetRedirectUrl,
         });
@@ -98,9 +98,7 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         setSuccessMsg('Password updated successfully! Redirecting to login...');
         
         setTimeout(() => {
-          window.history.replaceState({}, '', '/');
-          window.location.hash = '';
-          window.location.reload();
+          window.location.href = window.location.origin;
         }, 2000);
       }
     } catch (err: any) {
