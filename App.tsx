@@ -4,29 +4,8 @@ import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
 import { supabase } from './lib/supabase';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import Auth from './components/Auth';
 
 const App: React.FC = () => {
-  const { session, loading: authLoading, isPasswordRecovery } = useAuth();
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
-  // Show password reset form when user clicks reset link from email
-  if (isPasswordRecovery) {
-    return <Auth initialView="reset-password" />;
-  }
-
-  if (!session) {
-    return <Auth />;
-  }
-
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [user, setUser] = useState<User | null>(null);
@@ -40,17 +19,26 @@ const App: React.FC = () => {
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
     }
 
-    // Direct check for recovery token in URL hash
-    const checkRecovery = () => {
+    const checkUrlState = () => {
       const hash = window.location.hash;
-      if (hash && (hash.includes('type=recovery') || hash.includes('access_token='))) {
+      const params = new URLSearchParams(window.location.search);
+      const pathname = window.location.pathname;
+      
+      // Strict check for recovery markers or the specific route /reset-password
+      const isRecovery = hash.includes('type=recovery') || 
+                         hash.includes('access_token=') || 
+                         params.get('type') === 'recovery' ||
+                         hash.includes('recovery') ||
+                         pathname === '/reset-password';
+                         
+      if (isRecovery) {
         setIsRecovering(true);
       }
     };
 
-    checkRecovery();
+    checkUrlState();
 
-    // Check current session
+    // Check current session immediately
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setUser({
@@ -63,7 +51,7 @@ const App: React.FC = () => {
       setLoading(false);
     });
 
-    // Listen for auth changes
+    // Listen for all auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         setIsRecovering(true);
@@ -74,7 +62,7 @@ const App: React.FC = () => {
           avatar: ''
         });
         setIsLoggedIn(true);
-        setIsRecovering(false);
+        setIsRecovering(false); // If we have a session, we are no longer "recovering"
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setIsLoggedIn(false);
@@ -103,18 +91,29 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
-  // Show Auth screen if not logged in OR if in password recovery mode
-  if (!isLoggedIn || isRecovering) {
+  // If the user is on /reset-password or has a recovery token, show the Update view
+  if (isRecovering) {
     return (
       <Login 
         theme={theme} 
         toggleTheme={toggleTheme} 
-        initialView={isRecovering ? 'update' : 'login'} 
+        initialView="update" 
+      />
+    );
+  }
+
+  // Normal flow: check login status
+  if (!isLoggedIn) {
+    return (
+      <Login 
+        theme={theme} 
+        toggleTheme={toggleTheme} 
+        initialView="login" 
       />
     );
   }
@@ -132,11 +131,4 @@ const App: React.FC = () => {
   );
 };
 
-// Wrap App with AuthProvider
-const AppWithAuth = () => (
-  <AuthProvider>
-    <App />
-  </AuthProvider>
-);
-
-export default AppWithAuth;
+export default App;
