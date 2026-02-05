@@ -1,0 +1,5 @@
+{
+  "name": "Trip Tracker",
+  "description": "A sophisticated dashboard for managing trip ledgers, tracking expenses, and organizing travel plans with a modern, responsive UI and light/dark mode support.",
+  "requestFramePermissions": []
+}
