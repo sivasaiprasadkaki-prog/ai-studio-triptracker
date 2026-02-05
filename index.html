@@ -8,13 +8,50 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         body {
             font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
         }
-        .dark {
-            background-color: #0f172a;
+        .dark body {
+            background-color: #020617;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .animate-float {
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes blob {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -50px) scale(1.1); }
+            66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        .animate-blob {
+            animation: blob 7s infinite;
+        }
+        .animation-delay-2000 {
+            animation-delay: 2s;
+        }
+        .animation-delay-4000 {
+            animation-delay: 4s;
+        }
+
+        .staggered-item {
+            opacity: 0;
+            transform: translateY(10px);
+            animation: fadeInSlideUp 0.5s ease-out forwards;
+        }
+        @keyframes fadeInSlideUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
     </style>
     <script>
@@ -24,7 +61,9 @@
                 extend: {
                     colors: {
                         primary: '#3b82f6',
-                        secondary: '#64748b',
+                        slate: {
+                            950: '#020617'
+                        }
                     }
                 }
             }
@@ -33,20 +72,20 @@
 <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "react-dom": "https://esm.sh/react-dom@^19.2.4",
+    "react": "https://esm.sh/react@^19.0.0",
+    "react-dom": "https://esm.sh/react-dom@^19.0.0",
     "react-router-dom": "https://esm.sh/react-router-dom@^6.22.0",
     "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
     "jspdf": "https://esm.sh/jspdf@^2.5.1",
     "jspdf-autotable": "https://esm.sh/jspdf-autotable@^3.8.2",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.39.7"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.39.7",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/"
   }
 }
 </script>
 </head>
-<body class="bg-slate-50 text-slate-900 transition-colors duration-200">
+<body class="bg-slate-50 text-slate-900 transition-colors duration-200 antialiased overflow-hidden">
     <div id="root"></div>
     <script type="module" src="index.tsx"></script>
 </body>

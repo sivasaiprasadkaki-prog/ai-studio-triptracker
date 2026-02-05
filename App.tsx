@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -17,9 +17,15 @@ const AppContent: React.FC = () => {
     if (savedTheme) {
       setTheme(savedTheme);
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
+    } else {
+      // Default to system preference if no saved theme
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const initialTheme = prefersDark ? 'dark' : 'light';
+      setTheme(initialTheme);
+      document.documentElement.classList.toggle('dark', initialTheme === 'dark');
     }
 
-    // Check current session immediately
+    // Check current session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setUser({
@@ -32,7 +38,7 @@ const AppContent: React.FC = () => {
       setLoading(false);
     });
 
-    // Listen for auth events
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         setUser({
@@ -67,19 +73,19 @@ const AppContent: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 transition-colors">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
   return (
-    <Routes>
-      <Route 
-        path="/" 
-        element={
-          isLoggedIn ? (
-            <div className={theme}>
+    <div className={theme}>
+      <Routes>
+        <Route 
+          path="/" 
+          element={
+            isLoggedIn ? (
               <Dashboard 
                 user={user!} 
                 theme={theme} 
@@ -87,37 +93,37 @@ const AppContent: React.FC = () => {
                 onLogout={handleLogout}
                 onUserUpdate={handleUserUpdate}
               />
-            </div>
-          ) : (
+            ) : (
+              <Login 
+                theme={theme} 
+                toggleTheme={toggleTheme} 
+                initialView="login" 
+              />
+            )
+          } 
+        />
+        <Route 
+          path="/reset-password" 
+          element={
             <Login 
               theme={theme} 
               toggleTheme={toggleTheme} 
-              initialView="login" 
+              initialView="update" 
             />
-          )
-        } 
-      />
-      <Route 
-        path="/reset-password" 
-        element={
-          <Login 
-            theme={theme} 
-            toggleTheme={toggleTheme} 
-            initialView="update" 
-          />
-        } 
-      />
-      {/* Catch-all route to redirect back to home */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+          } 
+        />
+        {/* Redirect any unknown routes back to root */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
   );
 };
 
 const App: React.FC = () => {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AppContent />
-    </BrowserRouter>
+    </HashRouter>
   );
 };
 

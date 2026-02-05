@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Theme } from '../types';
-import { Sun, Moon, Wallet, User as UserIcon, Mail, Lock, Loader2, ArrowLeft, CheckCircle2, ShieldCheck, AlertTriangle, Eye, EyeOff, Copy, Settings2 } from 'lucide-react';
+import { Sun, Moon, Wallet, User as UserIcon, Mail, Lock, Loader2, ArrowLeft, CheckCircle2, ShieldCheck, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type AuthView = 'login' | 'register' | 'forgot' | 'update';
@@ -23,10 +23,8 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<{ message: string; type: string } | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
-  // Dynamically generate the redirect URL based on current origin for production safety
-  const resetRedirectUrl = `${window.location.origin}/reset-password`;
+  const resetRedirectUrl = `${window.location.origin}/#/reset-password`;
 
   useEffect(() => {
     setView(initialView);
@@ -38,12 +36,6 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
       .match(
         /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/
       );
-  };
-
-  const copyUrl = () => {
-    navigator.clipboard.writeText(resetRedirectUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -79,12 +71,9 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         if (!validateEmail(email.trim())) {
           throw new Error("Please enter a valid email address.");
         }
-
-        // Exact Supabase call with dynamic environment-aware redirect
         const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: resetRedirectUrl,
         });
-        
         if (err) throw err;
         setSuccessMsg('Password reset link sent to your email');
       }
@@ -92,13 +81,10 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         const { error: err } = await supabase.auth.updateUser({
           password: password
         });
-
         if (err) throw err;
-        
-        setSuccessMsg('Password updated successfully! Redirecting to login...');
-        
+        setSuccessMsg('Password updated successfully! Redirecting...');
         setTimeout(() => {
-          window.location.href = window.location.origin;
+          window.location.href = `${window.location.origin}/#/`;
         }, 2000);
       }
     } catch (err: any) {
@@ -117,21 +103,30 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
   };
 
   return (
-    <div className={`min-h-screen flex items-center justify-center p-4 transition-all duration-700 ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-50'}`}>
-      <button onClick={toggleTheme} className="absolute top-8 right-8 p-3 rounded-full bg-white dark:bg-slate-800 shadow-xl border dark:border-slate-700 hover:scale-110 active:scale-95 transition-all z-50">
-        {theme === 'light' ? <Moon className="w-5 h-5 text-slate-700" /> : <Sun className="w-5 h-5 text-yellow-400" />}
+    <div className={`min-h-screen flex items-center justify-center p-4 transition-colors duration-500 relative overflow-hidden ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-50'}`}>
+      
+      {/* Animated Background Blobs */}
+      <div className="absolute top-0 -left-4 w-72 h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+      <div className="absolute top-0 -right-4 w-72 h-72 bg-indigo-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+      <div className="absolute -bottom-8 left-20 w-72 h-72 bg-pink-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
+
+      <button 
+        onClick={toggleTheme} 
+        className="fixed top-6 right-6 p-3 rounded-full bg-white dark:bg-slate-800 shadow-lg border dark:border-slate-700 hover:scale-110 active:scale-95 transition-all z-50 group"
+      >
+        {theme === 'light' ? <Moon className="w-5 h-5 text-slate-700 group-hover:rotate-12 transition-transform" /> : <Sun className="w-5 h-5 text-yellow-400 group-hover:rotate-12 transition-transform" />}
       </button>
 
-      <div className="w-full max-w-[500px]">
-        <div className="bg-white dark:bg-slate-900 rounded-[3rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.15)] border dark:border-slate-800 aspect-square flex flex-col justify-center relative animate-in fade-in zoom-in-95 duration-500 overflow-hidden">
+      <div className="w-full max-w-[440px] z-10 animate-in fade-in zoom-in-95 duration-700 ease-out">
+        <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl rounded-[2.5rem] shadow-[0_30px_70px_rgba(0,0,0,0.08)] border border-white dark:border-slate-800 overflow-hidden">
           
           <div className="px-8 sm:px-12 py-10">
-            <div className="flex flex-col items-center mb-6">
-              <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-2xl shadow-blue-500/40">
-                {view === 'update' ? <ShieldCheck className="w-8 h-8 text-white" /> : <Wallet className="w-8 h-8 text-white" />}
+            <div className="flex flex-col items-center mb-10">
+              <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mb-5 shadow-2xl shadow-blue-600/30 animate-float">
+                {view === 'update' ? <ShieldCheck className="w-7 h-7 text-white" /> : <Wallet className="w-7 h-7 text-white" />}
               </div>
-              <h1 className="text-3xl font-black dark:text-white tracking-tighter">Trip Tracker</h1>
-              <p className="text-slate-500 font-bold text-sm mt-1">
+              <h1 className="text-3xl font-black dark:text-white tracking-tighter text-center staggered-item" style={{ animationDelay: '100ms' }}>Trip Tracker</h1>
+              <p className="text-slate-400 font-bold text-[10px] mt-1 uppercase tracking-[0.2em] opacity-80 staggered-item" style={{ animationDelay: '200ms' }}>
                 {view === 'login' && 'Secure Ledger Login'}
                 {view === 'register' && 'Create Your Account'}
                 {view === 'forgot' && 'Account Recovery'}
@@ -140,89 +135,78 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
             </div>
 
             {error && (
-              <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-900/10 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-[10px] font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>{error.message}</span>
+              <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-900/10 border-l-4 border-red-500 text-red-700 dark:text-red-400 text-xs font-bold flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+                <AlertTriangle className="w-5 h-5 flex-shrink-0" /> <span>{error.message}</span>
               </div>
             )}
 
             {successMsg && (
-              <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/10 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-[10px] font-bold rounded-xl flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0" /> {successMsg}
+              <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/10 border-l-4 border-green-500 text-green-700 dark:text-green-400 text-xs font-bold rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+                <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> {successMsg}
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="space-y-6">
               {view === 'register' && (
-                <div className="relative">
-                  <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-11 pr-4 py-4 rounded-2xl border-2 dark:bg-slate-950 dark:text-white border-slate-100 dark:border-slate-800 focus:border-blue-500 outline-none font-bold text-sm" placeholder="Full Name" required />
+                <div className="space-y-2 staggered-item" style={{ animationDelay: '300ms' }}>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 ml-1">Full Name</label>
+                  <div className="relative group">
+                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
+                    <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-white dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-medium text-sm transition-all" placeholder="Enter your full name" required />
+                  </div>
                 </div>
               )}
               
               {(view === 'login' || view === 'register' || view === 'forgot') && (
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-11 pr-4 py-4 rounded-2xl border-2 dark:bg-slate-950 dark:text-white border-slate-100 dark:border-slate-800 focus:border-blue-500 outline-none font-bold text-sm" placeholder="Email Address" required />
+                <div className="space-y-2 staggered-item" style={{ animationDelay: '400ms' }}>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 ml-1">Email</label>
+                  <div className="relative group">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-11 pr-4 py-3.5 rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-white dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-medium text-sm transition-all" placeholder="Enter your email" required />
+                  </div>
                 </div>
               )}
 
               {view !== 'forgot' && (
-                <div className="space-y-3.5">
-                  <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                    <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-11 pr-14 py-4 rounded-2xl border-2 dark:bg-slate-950 dark:text-white border-slate-100 dark:border-slate-800 focus:border-blue-500 outline-none font-bold text-sm" placeholder={view === 'update' ? "New Password" : "Password"} required />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                <div className="space-y-5">
+                  <div className="space-y-2 staggered-item" style={{ animationDelay: '500ms' }}>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 ml-1">{view === 'update' ? 'New Password' : 'Password'}</label>
+                    <div className="relative group">
+                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
+                      <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-11 pr-14 py-3.5 rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-white dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-medium text-sm transition-all" placeholder="Enter your password" required />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-blue-500 transition-colors">{showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                    </div>
                   </div>
+                  
                   {(view === 'register' || view === 'update') && (
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                      <input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full pl-11 pr-14 py-4 rounded-2xl border-2 dark:bg-slate-950 dark:text-white border-slate-100 dark:border-slate-800 focus:border-blue-500 outline-none font-bold text-sm" placeholder="Confirm Password" required />
-                      <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400">{showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                    <div className="space-y-2 staggered-item" style={{ animationDelay: '600ms' }}>
+                      <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 ml-1">Confirm Password</label>
+                      <div className="relative group">
+                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300 group-focus-within:text-blue-500 transition-colors" />
+                        <input type={showConfirmPassword ? "text" : "password"} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="w-full pl-11 pr-14 py-3.5 rounded-xl border border-slate-200 dark:bg-slate-950 dark:text-white dark:border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-medium text-sm transition-all" placeholder="Confirm your password" required />
+                        <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-blue-500 transition-colors">{showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
+                      </div>
                     </div>
                   )}
-                  {view === 'login' && <div className="text-right"><button type="button" onClick={() => toggleView('forgot')} className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline">Forgot Password?</button></div>}
+                  {view === 'login' && <div className="text-center staggered-item" style={{ animationDelay: '600ms' }}><button type="button" onClick={() => toggleView('forgot')} className="text-sm font-bold text-blue-500 hover:text-blue-600 transition-all hover:scale-105">Forgot password?</button></div>}
                 </div>
               )}
 
-              <button type="submit" disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-500/30 flex items-center justify-center gap-2 transition-all active:scale-95">
-                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span className="text-sm uppercase tracking-wider">{view === 'login' ? 'Sign In' : view === 'register' ? 'Register' : view === 'forgot' ? 'Send Recovery Link' : 'Submit New Password'}</span>}
+              <button type="submit" disabled={loading} className="w-full bg-blue-500/10 hover:bg-blue-500 hover:text-white text-blue-600 dark:text-blue-400 font-bold py-4 rounded-xl border border-blue-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.96] disabled:opacity-70 mt-2 shadow-sm hover:shadow-blue-500/20 staggered-item" style={{ animationDelay: '700ms' }}>
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <span className="text-sm">{view === 'login' ? 'Login' : view === 'register' ? 'Sign Up' : view === 'forgot' ? 'Reset Password' : 'Update Password'}</span>}
               </button>
             </form>
 
-            {view === 'forgot' && (
-              <div className="mt-8 p-5 bg-blue-50/50 dark:bg-slate-950 rounded-3xl border border-blue-100 dark:border-slate-800 animate-in slide-in-from-bottom-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                    <Settings2 className="w-3.5 h-3.5 text-blue-600" />
-                  </div>
-                  <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Supabase Config</p>
-                </div>
-                <p className="text-[9px] text-slate-400 mb-4 leading-relaxed font-bold">
-                  Copy this URL and add it to your Supabase Dashboard <strong>"Redirect URLs"</strong>:
-                </p>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
-                    <code className="text-[10px] font-mono text-blue-600 font-black flex-1 truncate">{resetRedirectUrl}</code>
-                    <button onClick={copyUrl} className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg transition-all active:scale-95">
-                      {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-                      <span className="text-[9px] font-black text-slate-500">{copied ? 'COPIED' : 'COPY'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {(view === 'register' || view === 'forgot' || view === 'update') && (
-              <button onClick={() => toggleView('login')} className="w-full flex items-center justify-center gap-2 mt-6 text-xs font-black text-slate-400 hover:text-slate-600 uppercase tracking-widest"><ArrowLeft className="w-4 h-4" /> Back to Login</button>
+              <button onClick={() => toggleView('login')} className="w-full flex items-center justify-center gap-2 mt-8 text-sm font-bold text-slate-400 hover:text-slate-600 transition-all hover:-translate-x-1"><ArrowLeft className="w-4 h-4" /> Back to Login</button>
             )}
           </div>
 
           {(view === 'login' || view === 'register') && (
-            <div className="absolute bottom-0 left-0 right-0 bg-slate-50/50 dark:bg-slate-950/50 p-6 border-t border-slate-100 dark:border-slate-800 text-center">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                {view === 'register' ? 'Already have an account?' : "New here?"}
-                <button onClick={() => toggleView(view === 'register' ? 'login' : 'register')} className="ml-2 text-blue-600 hover:underline">{view === 'register' ? 'Sign In' : 'Create Account'}</button>
+            <div className="bg-slate-50/50 dark:bg-slate-950/50 p-8 border-t border-slate-100 dark:border-slate-800 text-center staggered-item" style={{ animationDelay: '800ms' }}>
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                {view === 'register' ? 'Already have an account?' : "Don't have an account?"}
+                <button onClick={() => toggleView(view === 'register' ? 'login' : 'register')} className="ml-2 text-blue-500 font-bold hover:text-blue-600 transition-all hover:underline underline-offset-4">{view === 'register' ? 'Login' : 'Sign up'}</button>
               </p>
             </div>
           )}
