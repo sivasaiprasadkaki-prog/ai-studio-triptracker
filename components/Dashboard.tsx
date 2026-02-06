@@ -154,22 +154,30 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
   const handleAddEntry = async (ledgerId: string, entry: Entry) => {
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) throw new Error("Not authenticated");
+
       const { data, error } = await supabase
         .from('entries')
         .insert([{
           ledger_id: ledgerId,
+          user_id: userId, // Explicitly include user_id to satisfy RLS
           type: entry.type,
           date_time: entry.dateTime,
           details: entry.details,
           amount: entry.amount,
           category: entry.category,
           mode: entry.mode,
-          attachments: entry.attachments
+          attachments: entry.attachments || []
         }])
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase error during entry addition:", error);
+        throw error;
+      }
 
       const newEntry: Entry = { ...data, dateTime: data.date_time };
       setLedgers(prev => prev.map(l => 
@@ -180,22 +188,27 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       ));
     } catch (err: any) {
       console.error('Entry add error:', err);
+      alert('Error adding entry: ' + (err.message || 'Check RLS policies.'));
     }
   };
 
   const handleDeleteEntry = async (ledgerId: string, entryId: string) => {
-    setLedgers(prev => prev.map(l => {
-      if (l.id === ledgerId) {
-        return { ...l, entries: l.entries.filter(e => e.id !== entryId) };
-      }
-      return l;
-    }));
-
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+
+      setLedgers(prev => prev.map(l => {
+        if (l.id === ledgerId) {
+          return { ...l, entries: l.entries.filter(e => e.id !== entryId) };
+        }
+        return l;
+      }));
+
       const { error } = await supabase
         .from('entries')
         .delete()
-        .eq('id', entryId);
+        .eq('id', entryId)
+        .eq('user_id', userId); // Ensure user can only delete their own
 
       if (error) throw error;
     } catch (err: any) {
@@ -206,18 +219,22 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   };
 
   const handleBulkDeleteEntries = async (ledgerId: string, entryIds: string[]) => {
-    setLedgers(prev => prev.map(l => {
-      if (l.id === ledgerId) {
-        return { ...l, entries: l.entries.filter(e => !entryIds.includes(e.id)) };
-      }
-      return l;
-    }));
-
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+
+      setLedgers(prev => prev.map(l => {
+        if (l.id === ledgerId) {
+          return { ...l, entries: l.entries.filter(e => !entryIds.includes(e.id)) };
+        }
+        return l;
+      }));
+
       const { error } = await supabase
         .from('entries')
         .delete()
-        .in('id', entryIds);
+        .in('id', entryIds)
+        .eq('user_id', userId);
 
       if (error) throw error;
     } catch (err: any) {
@@ -228,6 +245,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
   const handleUpdateEntry = async (ledgerId: string, entry: Entry) => {
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+
       const { error } = await supabase
         .from('entries')
         .update({
@@ -239,7 +259,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           mode: entry.mode,
           attachments: entry.attachments
         })
-        .eq('id', entry.id);
+        .eq('id', entry.id)
+        .eq('user_id', userId);
 
       if (error) throw error;
 

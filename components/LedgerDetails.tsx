@@ -1,16 +1,17 @@
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Ledger, Entry } from '../types';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { Ledger, Entry, Attachment } from '../types';
 import { 
   ArrowLeft, FileDown, TrendingUp, TrendingDown, Wallet, 
   PlusCircle, MinusCircle, ChevronDown, Paperclip, X, 
-  Image as ImageIcon, Edit2, Trash2, FileText, Download,
-  IndianRupee, Eye, CheckSquare, Square, ArrowUp, ArrowDown,
-  ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, AlertCircle
+  Edit2, Trash2, FileText, Download,
+  IndianRupee, CheckSquare, Square, ArrowUp, ArrowDown,
+  ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, Check, Plus
 } from 'lucide-react';
 import Modal from './Modal';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import { supabase } from '../lib/supabase';
 
 interface LedgerDetailsProps {
   ledger: Ledger;
@@ -116,18 +117,13 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     
-    // Header information and table (list) removed as per request
-    
     let isFirstPage = true;
 
     for (const entry of ledger.entries) {
       if (entry.attachments && entry.attachments.length > 0) {
         for (const att of entry.attachments) {
-          if (att.data.startsWith('data:image/')) {
-            // Only add a page if it's not the very first image we're adding
-            if (!isFirstPage) {
-              doc.addPage();
-            }
+          if (att.data && att.data.startsWith('data:image/')) {
+            if (!isFirstPage) doc.addPage();
             isFirstPage = false;
 
             try {
@@ -139,13 +135,10 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
               const finalWidth = imgProps.width * ratio;
               const finalHeight = imgProps.height * ratio;
               
-              // Center the image on the page
               const xPos = (pageWidth - finalWidth) / 2;
               const yPos = (pageHeight - finalHeight) / 2;
               
               doc.addImage(att.data, 'JPEG', xPos, yPos, finalWidth, finalHeight);
-              
-              // Overlay and identifying text removed as requested
             } catch (err) {
               console.error("PDF Export Image Error:", err);
             }
@@ -154,7 +147,6 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       }
     }
 
-    // Save strictly the images
     doc.save(`${ledger.name.replace(/\s+/g, '_')}_Attachments.pdf`);
     setIsReportsOpen(false);
   };
@@ -444,15 +436,106 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
 const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; onSave: (e: Entry) => void; onCancel: () => void; }> = ({ type: initialType, initialData, onSave, onCancel }) => {
   const [activeType, setActiveType] = useState<'in' | 'out'>(initialType);
   const [isDragging, setIsDragging] = useState(false);
+  const [categoriesList, setCategoriesList] = useState<string[]>([]);
+  const [isLoadingCats, setIsLoadingCats] = useState(true);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+
+  // The base categories required by the user
+  const baseCategories = ['Food', 'Rent', 'Utilities', 'Transport', 'Advance'];
+
   const [formData, setFormData] = useState({
     dateTime: initialData?.dateTime || new Date().toISOString().slice(0, 16),
     details: initialData?.details || '',
     amount: initialData?.amount?.toString() || '',
-    category: initialData?.category || 'Food',
+    category: initialData?.category || '',
     mode: initialData?.mode || 'Cash'
   });
-  const [attachments, setAttachments] = useState<{ id: string; name: string; data: string; type: string }[]>(initialData?.attachments || []);
+  
+  const [customCategory, setCustomCategory] = useState(initialData?.category || '');
+  const [customMode, setCustomMode] = useState(initialData?.mode || '');
+  
+  const modes = ['Cash', 'UPI', 'Card', 'Custom'];
+
+  const [attachments, setAttachments] = useState<Attachment[]>(initialData?.attachments || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchCategories = useCallback(async (autoSelectName?: string) => {
+    setIsLoadingCats(true);
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('name')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+
+      // Extract names from DB
+      const dbNames = (data || []).map(c => c.name);
+      
+      // Combine base categories with database categories and ensure uniqueness
+      const mergedSet = new Set([...baseCategories, ...dbNames]);
+      
+      // Legacy protection: If the entry being edited has a category not in the set, add it
+      if (initialData?.category && !mergedSet.has(initialData.category)) {
+        mergedSet.add(initialData.category);
+      }
+
+      const finalNames = Array.from(mergedSet).sort((a, b) => a.localeCompare(b));
+      setCategoriesList(finalNames);
+      
+      if (autoSelectName) {
+        setFormData(prev => ({ ...prev, category: autoSelectName }));
+      } else if (!formData.category && !initialData?.category) {
+        // Default to the first base category if no selection exists
+        setFormData(prev => ({ ...prev, category: baseCategories[0] }));
+      }
+    } catch (err) {
+      console.error("Error fetching categories:", err);
+      // Even on error, ensure base categories are visible
+      setCategoriesList(baseCategories);
+      if (!formData.category && !initialData?.category) {
+        setFormData(prev => ({ ...prev, category: baseCategories[0] }));
+      }
+    } finally {
+      setIsLoadingCats(false);
+    }
+  }, [initialData?.category]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  const handleSaveCustomCategory = async () => {
+    const normalizedName = customCategory.trim();
+    if (!normalizedName) return;
+    
+    setIsSavingCategory(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      
+      // Check if it already exists (case-insensitive)
+      const exists = categoriesList.some(c => c.toLowerCase() === normalizedName.toLowerCase());
+      
+      if (exists) {
+        const actualName = categoriesList.find(c => c.toLowerCase() === normalizedName.toLowerCase()) || normalizedName;
+        setFormData(prev => ({ ...prev, category: actualName }));
+      } else {
+        const { error } = await supabase
+          .from('categories')
+          .insert([{ name: normalizedName, user_id: userId }]);
+
+        if (error) throw error;
+        // Re-fetch all and auto-select the new one
+        await fetchCategories(normalizedName);
+      }
+    } catch (err: any) {
+      console.error("Failed to add custom category:", err);
+      alert("Error adding custom category: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
 
   const handleFiles = (files: FileList | File[]) => {
     const filesArray = Array.from(files);
@@ -463,9 +546,9 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
         if (event.target?.result) {
           setAttachments(prev => [...prev, { 
             id: Math.random().toString(36).substr(2, 9), 
-            name: file.name, 
+            file_name: file.name, 
             data: event.target?.result as string, 
-            type: file.type 
+            file_type: file.type 
           }]);
         }
       };
@@ -481,9 +564,58 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
     if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ id: initialData?.id || crypto.randomUUID(), type: activeType, ...formData, amount: parseFloat(formData.amount), attachments });
+    
+    let finalCategory = formData.category;
+    let finalMode = formData.mode;
+
+    // Handle the "Custom" case if they didn't click the "Add" button but clicked "Save Transaction"
+    if (formData.category === 'Custom') {
+      const normalized = customCategory.trim();
+      if (!normalized) {
+        alert("Please specify a category");
+        return;
+      }
+      finalCategory = normalized;
+      
+      // Background save to DB if it doesn't exist
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const userId = userData.user?.id;
+        const exists = categoriesList.some(c => c.toLowerCase() === normalized.toLowerCase());
+        if (!exists && userId) {
+          await supabase.from('categories').insert([{ name: normalized, user_id: userId }]);
+        }
+      } catch (err) {
+        console.error("Background category save failed:", err);
+      }
+    }
+
+    if (formData.mode === 'Custom') {
+      const normalized = customMode.trim();
+      if (!normalized) {
+        alert("Please specify a payment mode");
+        return;
+      }
+      finalMode = normalized;
+    }
+
+    if (!finalCategory.trim()) {
+      alert("Please specify a category");
+      return;
+    }
+
+    onSave({ 
+      id: initialData?.id || crypto.randomUUID(), 
+      user_id: initialData?.user_id || '',
+      type: activeType, 
+      ...formData, 
+      category: finalCategory,
+      mode: finalMode,
+      amount: parseFloat(formData.amount), 
+      attachments 
+    });
   };
 
   return (
@@ -497,10 +629,60 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
         <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Amount (₹)</label><input type="number" step="0.01" value={formData.amount} onChange={e => setFormData({ ...formData, amount: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl font-black text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all" placeholder="0.00" required /></div>
       </div>
       <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Details</label><input type="text" value={formData.details} onChange={e => setFormData({ ...formData, details: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all" placeholder="Enter transaction details" required /></div>
+      
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Category</label><select value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all">{['Food', 'Fuel', 'Utilities', 'Transport', 'Shopping', 'Travel', 'Other'].map(cat => <option key={cat} value={cat}>{cat}</option>)}</select></div>
-        <div className="space-y-1"><label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Mode</label><select value={formData.mode} onChange={e => setFormData({ ...formData, mode: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all">{['Cash', 'UPI', 'Card', 'Other'].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Category</label>
+          <select value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all" disabled={isLoadingCats}>
+            {isLoadingCats ? <option>Loading...</option> : (
+              <>
+                {categoriesList.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                <option value="Custom">Custom</option>
+              </>
+            )}
+          </select>
+          {formData.category === 'Custom' && (
+            <div className="animate-in fade-in slide-in-from-top-1 mt-2 flex gap-2">
+              <input 
+                autoFocus
+                type="text" 
+                value={customCategory} 
+                onChange={e => setCustomCategory(e.target.value)} 
+                className="flex-1 px-4 py-2.5 bg-blue-50 dark:bg-slate-800 rounded-xl text-xs border-2 border-blue-200 focus:border-blue-500 outline-none font-bold"
+                placeholder="Type custom category..."
+              />
+              <button 
+                type="button"
+                onClick={handleSaveCustomCategory}
+                disabled={isSavingCategory || !customCategory.trim()}
+                className="p-2.5 bg-blue-600 text-white rounded-xl shadow-lg hover:bg-blue-700 active:scale-90 transition-all disabled:opacity-50"
+                title="Add Category"
+              >
+                {isSavingCategory ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Mode</label>
+          <select value={formData.mode} onChange={e => setFormData({ ...formData, mode: e.target.value })} className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 rounded-2xl text-sm border-2 border-transparent focus:border-blue-500 outline-none transition-all">
+            {modes.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          {formData.mode === 'Custom' && (
+            <div className="animate-in fade-in slide-in-from-top-1 mt-2">
+              <input 
+                autoFocus
+                type="text" 
+                value={customMode} 
+                onChange={e => setCustomMode(e.target.value)} 
+                className="w-full px-4 py-2.5 bg-blue-50 dark:bg-slate-800 rounded-xl text-xs border-2 border-blue-200 focus:border-blue-500 outline-none font-bold"
+                placeholder="Type custom mode..."
+              />
+            </div>
+          )}
+        </div>
       </div>
+      
       <div className="space-y-3">
         <div className="flex justify-between items-center"><label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Attachments</label></div>
         
