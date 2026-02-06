@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Ledger, User, Theme, Entry } from '../types';
+import { Ledger, User, Theme, Entry, Attachment } from '../types';
 import Header from './Header';
 import LedgerCard from './LedgerCard';
 import LedgerDetails from './LedgerDetails';
@@ -70,6 +70,43 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   const filteredLedgers = useMemo(() => {
     return ledgers.filter(l => l.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [ledgers, searchQuery]);
+
+  const uploadAttachments = async (attachments: Attachment[], userId: string): Promise<Attachment[]> => {
+    if (!attachments || attachments.length === 0) return [];
+    
+    return Promise.all(attachments.map(async (att) => {
+      // Only upload if it has data (base64) and hasn't been uploaded yet
+      if (att.data && att.data.startsWith('data:') && !att.file_path) {
+        try {
+          const res = await fetch(att.data);
+          const blob = await res.blob();
+          const fileExt = att.file_type.split('/')[1] || 'png';
+          const fileName = `${userId}/${crypto.randomUUID()}.${fileExt}`;
+          
+          const { data, error } = await supabase.storage
+            .from('triptracker-files')
+            .upload(fileName, blob, { contentType: att.file_type });
+
+          if (error) throw error;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('triptracker-files')
+            .getPublicUrl(data.path);
+
+          return {
+            ...att,
+            file_path: data.path,
+            url: publicUrl,
+            data: '' // Remove base64 after upload to minimize DB footprint
+          };
+        } catch (err) {
+          console.error("Failed to upload attachment:", att.file_name, err);
+          return att;
+        }
+      }
+      return att;
+    }));
+  };
 
   const handleCreateLedger = async () => {
     if (!newLedgerName.trim()) return;
@@ -158,18 +195,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not authenticated");
 
+      // Upload files to storage first
+      const updatedAttachments = await uploadAttachments(entry.attachments, userId);
+
       const { data, error } = await supabase
         .from('entries')
         .insert([{
           ledger_id: ledgerId,
-          user_id: userId, // Explicitly include user_id to satisfy RLS
+          user_id: userId,
           type: entry.type,
           date_time: entry.dateTime,
           details: entry.details,
           amount: entry.amount,
           category: entry.category,
           mode: entry.mode,
-          attachments: entry.attachments || []
+          attachments: updatedAttachments
         }])
         .select()
         .single();
@@ -208,7 +248,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         .from('entries')
         .delete()
         .eq('id', entryId)
-        .eq('user_id', userId); // Ensure user can only delete their own
+        .eq('user_id', userId);
 
       if (error) throw error;
     } catch (err: any) {
@@ -248,6 +288,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
 
+      // Upload new files to storage
+      const updatedAttachments = await uploadAttachments(entry.attachments, userId!);
+
       const { error } = await supabase
         .from('entries')
         .update({
@@ -257,7 +300,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           amount: entry.amount,
           category: entry.category,
           mode: entry.mode,
-          attachments: entry.attachments
+          attachments: updatedAttachments
         })
         .eq('id', entry.id)
         .eq('user_id', userId);
@@ -267,7 +310,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       setLedgers(prev => prev.map(l => 
         l.id === ledgerId ? { 
           ...l, 
-          entries: l.entries.map(e => e.id === entry.id ? entry : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
+          entries: l.entries.map(e => e.id === entry.id ? { ...entry, attachments: updatedAttachments } : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
         } : l
       ));
     } catch (err: any) {

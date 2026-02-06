@@ -122,12 +122,13 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     for (const entry of ledger.entries) {
       if (entry.attachments && entry.attachments.length > 0) {
         for (const att of entry.attachments) {
-          if (att.data && att.data.startsWith('data:image/')) {
+          const imgSrc = att.url || att.data;
+          if (imgSrc && imgSrc.startsWith('data:image/')) {
             if (!isFirstPage) doc.addPage();
             isFirstPage = false;
 
             try {
-              const imgProps = doc.getImageProperties(att.data);
+              const imgProps = doc.getImageProperties(imgSrc);
               const margin = 14;
               const maxImgWidth = pageWidth - (margin * 2);
               const maxImgHeight = pageHeight - (margin * 2); 
@@ -138,7 +139,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
               const xPos = (pageWidth - finalWidth) / 2;
               const yPos = (pageHeight - finalHeight) / 2;
               
-              doc.addImage(att.data, 'JPEG', xPos, yPos, finalWidth, finalHeight);
+              doc.addImage(imgSrc, 'JPEG', xPos, yPos, finalWidth, finalHeight);
             } catch (err) {
               console.error("PDF Export Image Error:", err);
             }
@@ -415,7 +416,7 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
           style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
         >
           <img 
-            src={entry.attachments[activeIndex].data} 
+            src={entry.attachments[activeIndex].url || entry.attachments[activeIndex].data} 
             className="max-w-[90vw] max-h-[80vh] object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10" 
             alt="Attachment" 
           />
@@ -424,7 +425,7 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
         <div className="absolute bottom-8 flex gap-3 overflow-x-auto max-w-[90%] p-3 bg-white/5 rounded-2xl backdrop-blur-md border border-white/10 scrollbar-hide">
           {entry.attachments.map((att, idx) => (
             <button key={att.id} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
-              <img src={att.data} className="w-full h-full object-cover" alt="" />
+              <img src={att.url || att.data} className="w-full h-full object-cover" alt="" />
             </button>
           ))}
         </div>
@@ -702,7 +703,7 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
           <div className="grid grid-cols-5 gap-2 pt-2 animate-in fade-in slide-in-from-bottom-2">
             {attachments.map((att) => (
               <div key={att.id} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group/item shadow-sm bg-slate-100 dark:bg-slate-700">
-                <img src={att.data} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
+                <img src={att.url || att.data} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
                 <button 
                   type="button" 
                   onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter(a => a.id !== att.id)); }} 
