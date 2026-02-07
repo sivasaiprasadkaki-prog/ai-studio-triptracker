@@ -5,6 +5,7 @@ import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
 import TripTrackerLoader from './components/TripTrackerLoader';
+import ResetPassword from './components/ResetPassword';
 import { supabase } from './lib/supabase';
 import { LoadingProvider, useLoading } from './context/LoadingContext';
 
@@ -104,10 +105,9 @@ const AppContent: React.FC = () => {
         <Route 
           path="/reset-password" 
           element={
-            <Login 
+            <ResetPassword 
               theme={theme} 
               toggleTheme={toggleTheme} 
-              initialView="update" 
             />
           } 
         />
