@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Ledger, User, Theme, Entry, Attachment } from '../types';
 import Header from './Header';
@@ -6,6 +7,7 @@ import LedgerDetails from './LedgerDetails';
 import Modal from './Modal';
 import { Plus, LayoutGrid, List, Wallet, Trash2, Loader2, Sparkles, ReceiptText } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useLoading } from '../context/LoadingContext';
 
 interface DashboardProps {
   user: User;
@@ -24,7 +26,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   const [searchQuery, setSearchQuery] = useState('');
   const [newLedgerName, setNewLedgerName] = useState('');
   const [ledgerError, setLedgerError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const { showLoading, hideLoading } = useLoading();
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   }, []);
 
   const fetchData = async () => {
-    setLoading(true);
+    showLoading();
     try {
       const { data: ledgersData, error: ledgersError } = await supabase
         .from('ledgers')
@@ -72,8 +74,25 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     } catch (err: any) {
       console.error('Error fetching data:', err);
     } finally {
-      setLoading(false);
+      hideLoading();
     }
+  };
+
+  const handleOpenLedger = (id: string) => {
+    showLoading();
+    // Use a small timeout to ensure the professional loader is visible during transition
+    setTimeout(() => {
+      setActiveLedgerId(id);
+      hideLoading();
+    }, 600);
+  };
+
+  const handleBackToDashboard = () => {
+    showLoading();
+    setTimeout(() => {
+      setActiveLedgerId(null);
+      hideLoading();
+    }, 400);
   };
 
   const activeLedger = useMemo(() => 
@@ -145,13 +164,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
     setLedgerError('');
 
-    // Validation: Check for unique ledger name (case-insensitive)
     const isDuplicate = ledgers.some(l => l.name.trim().toLowerCase() === trimmedName.toLowerCase());
     if (isDuplicate) {
       setLedgerError("Ledger already exists");
       return;
     }
 
+    showLoading();
     try {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error("No authenticated user found.");
@@ -181,12 +200,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     } catch (err: any) {
       console.error('Create error:', err);
       setLedgerError('Failed to create ledger: ' + err.message);
+    } finally {
+      hideLoading();
     }
   };
 
   const confirmDelete = async () => {
     if (!deleteConfirmationId) return;
     setIsDeleting(true);
+    showLoading();
     try {
       const { error: entriesError } = await supabase
         .from('entries')
@@ -210,6 +232,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       alert('Delete failed. Please try again.');
     } finally {
       setIsDeleting(false);
+      hideLoading();
     }
   };
 
@@ -217,13 +240,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     const trimmedName = newName.trim();
     if (!trimmedName) return false;
 
-    // Validation: Check for unique ledger name excluding current ledger
     const isDuplicate = ledgers.some(l => l.id !== id && l.name.trim().toLowerCase() === trimmedName.toLowerCase());
     if (isDuplicate) {
       alert("Ledger with this name already exists");
       return false;
     }
 
+    showLoading();
     try {
       const updateData: any = { name: trimmedName };
       if (createdAt) updateData.created_at = new Date(createdAt).toISOString();
@@ -240,10 +263,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     } catch (err: any) {
       console.error('Update error:', err);
       return false;
+    } finally {
+      hideLoading();
     }
   };
 
   const handleAddEntry = async (ledgerId: string, entry: Entry) => {
+    showLoading();
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -291,10 +317,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     } catch (err: any) {
       console.error('Entry add error:', err);
       alert('Error adding entry: ' + (err.message || 'Check RLS policies.'));
+    } finally {
+      hideLoading();
     }
   };
 
   const handleDeleteEntry = async (ledgerId: string, entryId: string) => {
+    showLoading();
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -317,10 +346,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       console.error('Entry delete error:', err);
       fetchData();
       alert('Failed to delete entry from cloud. Restoring list...');
+    } finally {
+      hideLoading();
     }
   };
 
   const handleBulkDeleteEntries = async (ledgerId: string, entryIds: string[]) => {
+    showLoading();
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -342,10 +374,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     } catch (err: any) {
       console.error('Bulk delete error:', err);
       fetchData();
+    } finally {
+      hideLoading();
     }
   };
 
   const handleUpdateEntry = async (ledgerId: string, entry: Entry) => {
+    showLoading();
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
@@ -378,6 +413,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       ));
     } catch (err: any) {
       console.error('Entry update error:', err);
+    } finally {
+      hideLoading();
     }
   };
 
@@ -387,23 +424,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     ));
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900 transition-colors">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
-          <p className="text-slate-500 font-bold animate-pulse">Syncing with Cloud...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (activeLedger) {
     return (
       <div className={`${theme} animate-in fade-in duration-300`}>
         <LedgerDetails 
           ledger={activeLedger} 
-          onBack={() => setActiveLedgerId(null)}
+          onBack={handleBackToDashboard}
           onAddEntry={(entry) => handleAddEntry(activeLedger.id, entry)}
           onDeleteEntry={handleDeleteEntry}
           onUpdateEntry={handleUpdateEntry}
@@ -485,7 +511,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
             
             <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8" : "flex flex-col gap-4"}>
               {filteredLedgers.map((ledger) => (
-                <div key={ledger.id} onClick={() => setActiveLedgerId(ledger.id)} className="cursor-pointer">
+                <div key={ledger.id} onClick={() => handleOpenLedger(ledger.id)} className="cursor-pointer">
                   <LedgerCard 
                     ledger={ledger} 
                     viewMode={viewMode}

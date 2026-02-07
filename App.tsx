@@ -4,13 +4,16 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Theme, User } from './types';
 import Login from './components/Auth';
 import Dashboard from './components/Dashboard';
+import TripTrackerLoader from './components/TripTrackerLoader';
 import { supabase } from './lib/supabase';
+import { LoadingProvider, useLoading } from './context/LoadingContext';
 
 const AppContent: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { isLoading, showLoading, hideLoading } = useLoading();
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as Theme;
@@ -18,14 +21,15 @@ const AppContent: React.FC = () => {
       setTheme(savedTheme);
       document.documentElement.classList.toggle('dark', savedTheme === 'dark');
     } else {
-      // Default to system preference if no saved theme
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       const initialTheme = prefersDark ? 'dark' : 'light';
       setTheme(initialTheme);
       document.documentElement.classList.toggle('dark', initialTheme === 'dark');
     }
 
-    // Check current session
+    // Use global loader for initial auth check
+    showLoading();
+    
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setUser({
@@ -35,10 +39,10 @@ const AppContent: React.FC = () => {
         });
         setIsLoggedIn(true);
       }
-      setLoading(false);
+      setIsAuthChecking(false);
+      hideLoading();
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         setUser({
@@ -64,23 +68,18 @@ const AppContent: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    showLoading();
     await supabase.auth.signOut();
+    hideLoading();
   };
 
   const handleUserUpdate = (updatedUser: Partial<User>) => {
     setUser(prev => prev ? { ...prev, ...updatedUser } : null);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 transition-colors">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
   return (
     <div className={theme}>
+      {isLoading && <TripTrackerLoader />}
       <Routes>
         <Route 
           path="/" 
@@ -112,7 +111,6 @@ const AppContent: React.FC = () => {
             />
           } 
         />
-        {/* Redirect any unknown routes back to root */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
@@ -121,9 +119,11 @@ const AppContent: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <HashRouter>
-      <AppContent />
-    </HashRouter>
+    <LoadingProvider>
+      <HashRouter>
+        <AppContent />
+      </HashRouter>
+    </LoadingProvider>
   );
 };
 

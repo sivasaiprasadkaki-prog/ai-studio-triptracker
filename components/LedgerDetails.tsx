@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Ledger, Entry, Attachment } from '../types';
 import { 
@@ -12,11 +13,13 @@ import Modal from './Modal';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { supabase } from '../lib/supabase';
+import { useLoading } from '../context/LoadingContext';
 
 interface LedgerDetailsProps {
   ledger: Ledger;
   onBack: () => void;
   onAddEntry: (entry: Entry) => void;
+  // Fix duplicate onDeleteEntry identifier
   onDeleteEntry: (ledgerId: string, entryId: string) => void;
   onUpdateEntry: (ledgerId: string, entry: Entry) => void;
   onBulkDelete: (ids: string[]) => void;
@@ -35,12 +38,6 @@ const formatTime = (dateStr: string | number) => {
   return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-/**
- * Modified AttachmentImage component
- * Requirement: Show Loader2 spinner until image fully loads
- * Requirement: Use object-contain to prevent cropping (No object-cover)
- * Fix: Added guard to prevent 'Cannot read properties of undefined (reading id)' error
- */
 const AttachmentImage: React.FC<{ 
   att?: Attachment; 
   className?: string; 
@@ -108,7 +105,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [isDownloading, setIsDownloading] = useState(false);
+  const { showLoading, hideLoading } = useLoading();
   const [downloadProgress, setDownloadProgress] = useState(0);
 
   const [galleryAttachments, setGalleryAttachments] = useState<Attachment[]>([]);
@@ -204,6 +201,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
 
   const handleConfirmDelete = async () => {
     setIsDeleting(true);
+    showLoading();
     try {
       for (const id of deleteIds) {
         await deleteAttachmentsFromStorage(id);
@@ -223,6 +221,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       console.error("Delete failed:", err);
     } finally {
       setIsDeleting(false);
+      hideLoading();
     }
   };
 
@@ -250,7 +249,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   };
 
   const handleExportPdf = async () => {
-    setIsDownloading(true);
+    showLoading();
     setDownloadProgress(10);
     
     await new Promise(r => setTimeout(r, 400));
@@ -299,14 +298,14 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     
     setDownloadProgress(100);
     setTimeout(() => {
-      setIsDownloading(false);
+      hideLoading();
       setDownloadProgress(0);
       setIsReportsOpen(false);
     }, 600);
   };
 
   const handleExportExcel = async () => {
-    setIsDownloading(true);
+    showLoading();
     setDownloadProgress(20);
 
     await new Promise(r => setTimeout(r, 500));
@@ -342,7 +341,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     
     setDownloadProgress(100);
     setTimeout(() => {
-      setIsDownloading(false);
+      hideLoading();
       setDownloadProgress(0);
       setIsReportsOpen(false);
     }, 600);
@@ -521,33 +520,6 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       </Modal>
 
       <GalleryModal isOpen={!!galleryEntry} onClose={() => setGalleryEntry(null)} entry={galleryEntry} processedAttachments={galleryAttachments} />
-
-      {isDownloading && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300 px-6">
-          <div className="bg-white dark:bg-slate-800 p-10 rounded-[2.5rem] shadow-2xl w-full max-w-sm flex flex-col items-center gap-6">
-            <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-3xl flex items-center justify-center text-blue-600">
-               <Loader2 className="w-10 h-10 animate-spin" />
-            </div>
-            <div className="text-center space-y-2">
-              <h3 className="text-2xl font-black text-slate-900 dark:text-white">Downloading...</h3>
-              <p className="text-slate-400 font-bold text-sm">Preparing your financial records.</p>
-            </div>
-            
-            <div className="w-full space-y-3">
-              <div className="flex justify-between items-center text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
-                <span>Progress</span>
-                <span>{Math.round(downloadProgress)}%</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden border border-slate-200 dark:border-slate-600 shadow-inner">
-                <div 
-                  className="h-full bg-blue-600 transition-all duration-500 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]"
-                  style={{ width: `${downloadProgress}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -571,17 +543,11 @@ const SummaryCard: React.FC<{ title: string; amount: number; color: 'green' | 'r
   );
 };
 
-/**
- * Gallery Modal with object-contain for main viewer and thumbnails
- * Requirement: Images must show EXACTLY as uploaded without cropping
- * Fix: Ensure zoom and rotation reset to 1 and 0 on open/image change to guarantee normal fit view.
- */
 const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entry | null; processedAttachments: Attachment[] }> = ({ isOpen, onClose, entry, processedAttachments }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
 
-  // Reset state whenever the modal opens or a different entry is selected
   useEffect(() => {
     if (isOpen) {
       setActiveIndex(0);
@@ -647,7 +613,6 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
           className="transition-transform duration-300 ease-out cursor-grab active:cursor-grabbing max-w-full max-h-full flex items-center justify-center"
           style={{ transform: `scale(${zoom}) rotate(${rotation}deg)`, width: '100%', height: '100%' }}
         >
-          {/* Main Viewer - Use object-contain and ensure parent constraints */}
           <AttachmentImage 
             att={currentAttachments[activeIndex]} 
             className="max-w-full max-h-full object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)]" 
@@ -655,7 +620,6 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
           />
         </div>
 
-        {/* Re-added Thumbnails */}
         <div className="absolute bottom-8 flex gap-3 overflow-x-auto max-w-[90%] p-3 bg-white/5 rounded-2xl backdrop-blur-md border border-white/10 scrollbar-hide">
           {currentAttachments.map((att, idx) => (
             <button key={att?.id || idx} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>

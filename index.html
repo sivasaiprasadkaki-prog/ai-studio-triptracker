@@ -42,6 +42,16 @@
             animation-delay: 4s;
         }
 
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .animate-shimmer {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1) 25%, rgba(59, 130, 246, 0.2) 50%, rgba(59, 130, 246, 0.1) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite linear;
+        }
+
         .staggered-item {
             opacity: 0;
             transform: translateY(10px);
