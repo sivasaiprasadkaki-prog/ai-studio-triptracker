@@ -6,7 +6,8 @@ import {
   PlusCircle, MinusCircle, ChevronDown, Paperclip, X, 
   Edit2, Trash2, FileText, Download,
   IndianRupee, CheckSquare, Square, ArrowUp, ArrowDown,
-  ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, Check, Plus
+  ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, Check, Plus,
+  FileImage
 } from 'lucide-react';
 import Modal from './Modal';
 import { jsPDF } from 'jspdf';
@@ -35,6 +36,44 @@ const formatTime = (dateStr: string | number) => {
   return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+/**
+ * STEP 2 & 3: AttachmentImage component
+ * Strictly uses attachment.url for rendering with a fallback logic.
+ * STEP 4: Remove any old logic that used base64 or raw file_path.
+ */
+const AttachmentImage: React.FC<{ 
+  att: Attachment; 
+  className?: string; 
+  alt?: string;
+}> = ({ att, className, alt }) => {
+  const [error, setError] = useState(false);
+  
+  useEffect(() => {
+    setError(false);
+  }, [att.id, att.url]);
+
+  // STEP 3: Fallback logic - If url is missing, use a placeholder
+  const src = att.url || '/placeholder-image.png';
+
+  if (error || !att.url) {
+    return (
+      <div className={`${className} flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg`}>
+        <FileImage className="w-1/2 h-1/2 opacity-20" />
+      </div>
+    );
+  }
+
+  // STEP 2: Use attachment.url as src
+  return (
+    <img 
+      src={att.url} 
+      className={className} 
+      alt={alt || att.file_name} 
+      onError={() => setError(true)} 
+    />
+  );
+};
+
 const LedgerDetails: React.FC<LedgerDetailsProps> = ({ 
   ledger, onBack, onAddEntry, onDeleteEntry, onUpdateEntry, onBulkDelete, onReorder
 }) => {
@@ -44,9 +83,51 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   const [galleryEntry, setGalleryEntry] = useState<Entry | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  // Custom delete confirmation states
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // STEP 1 – When loading attachments from DB, generate public URLs
+  const [galleryAttachments, setGalleryAttachments] = useState<Attachment[]>([]);
+
+  useEffect(() => {
+    const fetchGalleryAttachments = async () => {
+      if (!galleryEntry) {
+        setGalleryAttachments([]);
+        return;
+      }
+
+      try {
+        // STEP 1 Implementation
+        const { data: attachmentsData, error } = await supabase
+          .from('attachments')
+          .select('*')
+          .eq('entry_id', galleryEntry.id);
+
+        if (error) throw error;
+
+        const processedAttachments = (attachmentsData || []).map(att => {
+          const { data } = supabase.storage
+            .from('triptracker-files')
+            .getPublicUrl(att.file_path);
+
+          // STEP 5: Verify URL generation
+          console.log("Generated URL:", data.publicUrl);
+
+          return {
+            ...att,
+            url: data.publicUrl
+          };
+        });
+
+        setGalleryAttachments(processedAttachments);
+      } catch (err) {
+        console.error("Error fetching gallery attachments:", err);
+        setGalleryAttachments(galleryEntry.attachments);
+      }
+    };
+
+    fetchGalleryAttachments();
+  }, [galleryEntry]);
 
   const tableData = useMemo(() => {
     let currentBalance = 0;
@@ -122,8 +203,9 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     for (const entry of ledger.entries) {
       if (entry.attachments && entry.attachments.length > 0) {
         for (const att of entry.attachments) {
-          const imgSrc = att.url || att.data;
-          if (imgSrc && imgSrc.startsWith('data:image/')) {
+          const imgSrc = att.url || (att.file_path ? supabase.storage.from('triptracker-files').getPublicUrl(att.file_path).data.publicUrl : '');
+          
+          if (imgSrc && (imgSrc.startsWith('data:image/') || imgSrc.startsWith('http'))) {
             if (!isFirstPage) doc.addPage();
             isFirstPage = false;
 
@@ -355,7 +437,8 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
         </div>
       </Modal>
 
-      <GalleryModal isOpen={!!galleryEntry} onClose={() => setGalleryEntry(null)} entry={galleryEntry} />
+      {/* Gallery Modal */}
+      <GalleryModal isOpen={!!galleryEntry} onClose={() => setGalleryEntry(null)} entry={galleryEntry} processedAttachments={galleryAttachments} />
     </div>
   );
 };
@@ -379,12 +462,15 @@ const SummaryCard: React.FC<{ title: string; amount: number; color: 'green' | 'r
   );
 };
 
-const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entry | null }> = ({ isOpen, onClose, entry }) => {
+const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entry | null; processedAttachments: Attachment[] }> = ({ isOpen, onClose, entry, processedAttachments }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
 
-  if (!isOpen || !entry || !entry.attachments.length) return null;
+  if (!isOpen || !entry) return null;
+
+  const currentAttachments = processedAttachments.length > 0 ? processedAttachments : entry.attachments;
+  if (!currentAttachments.length) return null;
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
@@ -400,7 +486,7 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl animate-in fade-in transition-all">
       <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-[110]">
         <div className="text-white font-black uppercase tracking-widest text-[10px] bg-white/10 px-3 py-1.5 rounded-full border border-white/20 backdrop-blur-md">
-          {entry.details} • {activeIndex + 1} / {entry.attachments.length}
+          {entry.details} • {activeIndex + 1} / {currentAttachments.length}
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={handleZoomIn} className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-all border border-white/10" title="Zoom In"><ZoomIn className="w-5 h-5" /></button>
@@ -415,17 +501,18 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
           className="transition-transform duration-300 ease-out cursor-grab active:cursor-grabbing"
           style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
         >
-          <img 
-            src={entry.attachments[activeIndex].url || entry.attachments[activeIndex].data} 
-            className="max-w-[90vw] max-h-[80vh] object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)] border border-white/10" 
+          {/* STEP 2: Use AttachmentImage for consistent preview rendering (strictly .url) */}
+          <AttachmentImage 
+            att={currentAttachments[activeIndex]} 
+            className="max-w-[90vw] max-h-[80vh] object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)]" 
             alt="Attachment" 
           />
         </div>
 
         <div className="absolute bottom-8 flex gap-3 overflow-x-auto max-w-[90%] p-3 bg-white/5 rounded-2xl backdrop-blur-md border border-white/10 scrollbar-hide">
-          {entry.attachments.map((att, idx) => (
+          {currentAttachments.map((att, idx) => (
             <button key={att.id} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
-              <img src={att.url || att.data} className="w-full h-full object-cover" alt="" />
+              <AttachmentImage att={att} className="w-full h-full object-cover" alt="" />
             </button>
           ))}
         </div>
@@ -459,6 +546,27 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
 
   const [attachments, setAttachments] = useState<Attachment[]>(initialData?.attachments || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * STEP 1: For the editing form, ensure existing attachments have generated public URLs.
+   */
+  useEffect(() => {
+    const processInitialAttachments = async () => {
+      if (initialData?.id && initialData.attachments && initialData.attachments.length > 0) {
+        const processed = await Promise.all(initialData.attachments.map(async (att) => {
+          if (att.file_path && !att.url) {
+            const { data } = supabase.storage
+              .from('triptracker-files')
+              .getPublicUrl(att.file_path);
+            return { ...att, url: data.publicUrl };
+          }
+          return att;
+        }));
+        setAttachments(processed);
+      }
+    };
+    processInitialAttachments();
+  }, [initialData]);
 
   const fetchCategories = useCallback(async (autoSelectName?: string) => {
     setIsLoadingCats(true);
@@ -545,10 +653,12 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
+          const base64Data = event.target?.result as string;
           setAttachments(prev => [...prev, { 
             id: Math.random().toString(36).substr(2, 9), 
             file_name: file.name, 
-            data: event.target?.result as string, 
+            data: base64Data, 
+            url: base64Data, // Set url for unsaved preview to satisfy STEP 2 strictly
             file_type: file.type 
           }]);
         }
@@ -571,7 +681,7 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
     let finalCategory = formData.category;
     let finalMode = formData.mode;
 
-    // Handle the "Custom" case if they didn't click the "Add" button but clicked "Save Transaction"
+    // Handle the "Custom" case
     if (formData.category === 'Custom') {
       const normalized = customCategory.trim();
       if (!normalized) {
@@ -580,7 +690,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
       }
       finalCategory = normalized;
       
-      // Background save to DB if it doesn't exist
       try {
         const { data: userData } = await supabase.auth.getUser();
         const userId = userData.user?.id;
@@ -703,7 +812,8 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
           <div className="grid grid-cols-5 gap-2 pt-2 animate-in fade-in slide-in-from-bottom-2">
             {attachments.map((att) => (
               <div key={att.id} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group/item shadow-sm bg-slate-100 dark:bg-slate-700">
-                <img src={att.url || att.data} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
+                {/* Consistently using AttachmentImage for previews (strictly .url) */}
+                <AttachmentImage att={att} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
                 <button 
                   type="button" 
                   onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter(a => a.id !== att.id)); }} 

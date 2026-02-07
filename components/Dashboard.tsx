@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Ledger, User, Theme, Entry, Attachment } from '../types';
 import Header from './Header';
@@ -34,11 +33,15 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   const fetchData = async () => {
     setLoading(true);
     try {
+      // Step 3: Fetch entries joined with attachments table instead of reading JSONB
       const { data: ledgersData, error: ledgersError } = await supabase
         .from('ledgers')
         .select(`
           *,
-          entries (*)
+          entries (
+            *,
+            attachments (*)
+          )
         `)
         .order('created_at', { ascending: false });
 
@@ -50,7 +53,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         createdAt: new Date(l.created_at).getTime(),
         entries: (l.entries || []).map((e: any) => ({
           ...e,
-          dateTime: e.date_time
+          dateTime: e.date_time,
+          attachments: (e.attachments || []).map((att: any) => {
+            // Requirement 2: Construct the public URL using getPublicUrl
+            const { data } = supabase.storage
+              .from('triptracker-files')
+              .getPublicUrl(att.file_path);
+            
+            return {
+              ...att,
+              url: data.publicUrl
+            };
+          })
         })).sort((a: any, b: any) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
       }));
 
@@ -71,41 +85,56 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     return ledgers.filter(l => l.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [ledgers, searchQuery]);
 
-  const uploadAttachments = async (attachments: Attachment[], userId: string): Promise<Attachment[]> => {
-    if (!attachments || attachments.length === 0) return [];
-    
-    return Promise.all(attachments.map(async (att) => {
-      // Only upload if it has data (base64) and hasn't been uploaded yet
-      if (att.data && att.data.startsWith('data:') && !att.file_path) {
-        try {
-          const res = await fetch(att.data);
-          const blob = await res.blob();
-          const fileExt = att.file_type.split('/')[1] || 'png';
-          const fileName = `${userId}/${crypto.randomUUID()}.${fileExt}`;
-          
-          const { data, error } = await supabase.storage
-            .from('triptracker-files')
-            .upload(fileName, blob, { contentType: att.file_type });
+  const processAttachment = async (att: Attachment, userId: string, entryId: string): Promise<Attachment> => {
+    if (att.data && att.data.startsWith('data:') && !att.file_path) {
+      try {
+        const res = await fetch(att.data);
+        const blob = await res.blob();
+        
+        const filePath = `${userId}/${entryId}/${att.file_name}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('triptracker-files')
+          .upload(filePath, blob, { 
+            contentType: att.file_type,
+            upsert: true
+          });
 
-          if (error) throw error;
+        if (uploadError) throw uploadError;
 
-          const { data: { publicUrl } } = supabase.storage
-            .from('triptracker-files')
-            .getPublicUrl(data.path);
+        const attachmentRow = {
+          entry_id: entryId,
+          user_id: userId,
+          file_path: filePath,
+          file_name: att.file_name,
+          file_type: att.file_type
+        };
 
-          return {
-            ...att,
-            file_path: data.path,
-            url: publicUrl,
-            data: '' // Remove base64 after upload to minimize DB footprint
-          };
-        } catch (err) {
-          console.error("Failed to upload attachment:", att.file_name, err);
-          return att;
-        }
+        const { data: dbData, error: dbError } = await supabase
+          .from('attachments')
+          .insert([attachmentRow])
+          .select()
+          .single();
+
+        if (dbError) throw dbError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('triptracker-files')
+          .getPublicUrl(filePath);
+
+        return {
+          ...att,
+          id: dbData.id,
+          file_path: filePath,
+          url: publicUrl,
+          data: '' 
+        };
+      } catch (err) {
+        console.error("Failed to process attachment:", att.file_name, err);
+        return att;
       }
-      return att;
-    }));
+    }
+    return att;
   };
 
   const handleCreateLedger = async () => {
@@ -195,10 +224,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       const userId = userData.user?.id;
       if (!userId) throw new Error("Not authenticated");
 
-      // Upload files to storage first
-      const updatedAttachments = await uploadAttachments(entry.attachments, userId);
-
-      const { data, error } = await supabase
+      const { data: entryData, error: entryError } = await supabase
         .from('entries')
         .insert([{
           ledger_id: ledgerId,
@@ -208,18 +234,28 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           details: entry.details,
           amount: entry.amount,
           category: entry.category,
-          mode: entry.mode,
-          attachments: updatedAttachments
+          mode: entry.mode
         }])
         .select()
         .single();
 
-      if (error) {
-        console.error("Supabase error during entry addition:", error);
-        throw error;
+      if (entryError) throw entryError;
+
+      const entryId = entryData.id;
+
+      let finalAttachments: Attachment[] = [];
+      if (entry.attachments && entry.attachments.length > 0) {
+        finalAttachments = await Promise.all(
+          entry.attachments.map(att => processAttachment(att, userId, entryId))
+        );
       }
 
-      const newEntry: Entry = { ...data, dateTime: data.date_time };
+      const newEntry: Entry = { 
+        ...entryData, 
+        dateTime: entryData.date_time, 
+        attachments: finalAttachments 
+      };
+
       setLedgers(prev => prev.map(l => 
         l.id === ledgerId ? { 
           ...l, 
@@ -287,11 +323,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
     try {
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
+      if (!userId) return;
 
-      // Upload new files to storage
-      const updatedAttachments = await uploadAttachments(entry.attachments, userId!);
-
-      const { error } = await supabase
+      const { error: entryError } = await supabase
         .from('entries')
         .update({
           type: entry.type,
@@ -299,18 +333,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           details: entry.details,
           amount: entry.amount,
           category: entry.category,
-          mode: entry.mode,
-          attachments: updatedAttachments
+          mode: entry.mode
         })
         .eq('id', entry.id)
         .eq('user_id', userId);
 
-      if (error) throw error;
+      if (entryError) throw entryError;
+
+      const processedAttachments = await Promise.all(
+        entry.attachments.map(att => processAttachment(att, userId, entry.id))
+      );
 
       setLedgers(prev => prev.map(l => 
         l.id === ledgerId ? { 
           ...l, 
-          entries: l.entries.map(e => e.id === entry.id ? { ...entry, attachments: updatedAttachments } : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
+          entries: l.entries.map(e => e.id === entry.id ? { ...entry, attachments: processedAttachments } : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
         } : l
       ));
     } catch (err: any) {
