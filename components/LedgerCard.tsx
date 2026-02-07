@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Ledger } from '../types';
 import { Edit2, Trash2, Calendar, ChevronRight, Check, X, ArrowRight } from 'lucide-react';
@@ -7,7 +6,7 @@ interface LedgerCardProps {
   ledger: Ledger;
   viewMode?: 'grid' | 'list';
   onDelete: (id: string) => void;
-  onUpdate: (id: string, name: string, createdAt?: number) => void;
+  onUpdate: (id: string, name: string, createdAt?: number) => Promise<boolean> | void;
 }
 
 const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDelete, onUpdate }) => {
@@ -16,10 +15,11 @@ const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDe
   const [editName, setEditName] = useState(ledger.name);
   const [editDate, setEditDate] = useState(new Date(ledger.createdAt).toISOString().split('T')[0]);
 
-  const handleUpdate = (e: React.MouseEvent) => {
+  const handleUpdate = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (editName.trim()) {
-      onUpdate(ledger.id, editName, new Date(editDate).getTime());
+      const success = await onUpdate(ledger.id, editName, new Date(editDate).getTime());
+      if (success === false) return; // Stay in edit mode if validation failed
     }
     setIsEditing(false);
     setIsEditingDate(false);
@@ -76,6 +76,7 @@ const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDe
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleUpdate(e as any)}
                     className="w-full px-3 py-1 text-sm rounded-lg bg-slate-50 dark:bg-slate-700 border border-blue-500 outline-none text-slate-900 dark:text-white"
                   />
                 )}
@@ -84,6 +85,7 @@ const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDe
                     type="date"
                     value={editDate}
                     onChange={(e) => setEditDate(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleUpdate(e as any)}
                     className="w-full px-3 py-1 text-sm rounded-lg bg-slate-50 dark:bg-slate-700 border border-blue-500 outline-none text-slate-900 dark:text-white"
                   />
                 )}
@@ -170,6 +172,7 @@ const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDe
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleUpdate(e as any)}
                 className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-700 border border-blue-500 outline-none text-slate-900 dark:text-white mb-3 shadow-inner"
               />
             )}
@@ -178,6 +181,7 @@ const LedgerCard: React.FC<LedgerCardProps> = ({ ledger, viewMode = 'grid', onDe
                 type="date"
                 value={editDate}
                 onChange={(e) => setEditDate(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleUpdate(e as any)}
                 className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-700 border border-blue-500 outline-none text-slate-900 dark:text-white mb-3 shadow-inner"
               />
             )}

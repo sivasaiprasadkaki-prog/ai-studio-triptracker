@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Ledger, Entry, Attachment } from '../types';
 import { 
@@ -7,7 +6,7 @@ import {
   Edit2, Trash2, FileText, Download,
   IndianRupee, CheckSquare, Square, ArrowUp, ArrowDown,
   ZoomIn, ZoomOut, RotateCcw, UploadCloud, Loader2, Check, Plus,
-  FileImage
+  FileImage, ChevronRight
 } from 'lucide-react';
 import Modal from './Modal';
 import { jsPDF } from 'jspdf';
@@ -37,25 +36,38 @@ const formatTime = (dateStr: string | number) => {
 };
 
 /**
- * STEP 2 & 3: AttachmentImage component
- * Strictly uses attachment.url for rendering with a fallback logic.
- * STEP 4: Remove any old logic that used base64 or raw file_path.
+ * Modified AttachmentImage component
+ * Requirement: Show Loader2 spinner until image fully loads
+ * Requirement: Use object-contain to prevent cropping (No object-cover)
+ * Fix: Added guard to prevent 'Cannot read properties of undefined (reading id)' error
  */
 const AttachmentImage: React.FC<{ 
-  att: Attachment; 
+  att?: Attachment; 
   className?: string; 
   alt?: string;
 }> = ({ att, className, alt }) => {
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(true); 
   
   useEffect(() => {
+    if (!att) return;
     setError(false);
-  }, [att.id, att.url]);
+    setLoading(true); 
+  }, [att?.id, att?.url]);
 
-  // STEP 3: Fallback logic - If url is missing, use a placeholder
-  const src = att.url || '/placeholder-image.png';
+  const finalUrl = useMemo(() => {
+    if (!att) return '';
+    if (att.url) return att.url;
+    if (att.file_path) {
+      const { data } = supabase.storage
+        .from('triptracker-files')
+        .getPublicUrl(att.file_path);
+      return data?.publicUrl || '';
+    }
+    return att.data || '';
+  }, [att]);
 
-  if (error || !att.url) {
+  if (!att || error || !finalUrl) {
     return (
       <div className={`${className} flex items-center justify-center bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg`}>
         <FileImage className="w-1/2 h-1/2 opacity-20" />
@@ -63,14 +75,24 @@ const AttachmentImage: React.FC<{
     );
   }
 
-  // STEP 2: Use attachment.url as src
   return (
-    <img 
-      src={att.url} 
-      className={className} 
-      alt={alt || att.file_name} 
-      onError={() => setError(true)} 
-    />
+    <div className={`relative flex items-center justify-center ${className || ''}`}>
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-100/30 dark:bg-slate-800/30 z-10 backdrop-blur-[2px]">
+          <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+        </div>
+      )}
+      <img 
+        src={finalUrl} 
+        className={`w-full h-full object-contain transition-opacity duration-300 ${loading ? 'opacity-0' : 'opacity-100'}`} 
+        alt={alt || att.file_name} 
+        onLoad={() => setLoading(false)} 
+        onError={() => {
+          setError(true);
+          setLoading(false);
+        }} 
+      />
+    </div>
   );
 };
 
@@ -86,7 +108,9 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // STEP 1 – When loading attachments from DB, generate public URLs
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
   const [galleryAttachments, setGalleryAttachments] = useState<Attachment[]>([]);
 
   useEffect(() => {
@@ -97,41 +121,69 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       }
 
       try {
-        // STEP 1 Implementation
-        const { data: attachmentsData, error } = await supabase
+        const { data: attachmentsData } = await supabase
           .from('attachments')
           .select('*')
           .eq('entry_id', galleryEntry.id);
 
-        if (error) throw error;
+        if (!attachmentsData) {
+          setGalleryAttachments([]);
+          return;
+        }
 
-        const processedAttachments = (attachmentsData || []).map(att => {
+        const processedAttachments = attachmentsData.map(att => {
           const { data } = supabase.storage
             .from('triptracker-files')
             .getPublicUrl(att.file_path);
 
-          // STEP 5: Verify URL generation
-          console.log("Generated URL:", data.publicUrl);
-
           return {
             ...att,
-            url: data.publicUrl
+            url: data?.publicUrl || ''
           };
         });
 
         setGalleryAttachments(processedAttachments);
       } catch (err) {
         console.error("Error fetching gallery attachments:", err);
-        setGalleryAttachments(galleryEntry.attachments);
+        setGalleryAttachments(galleryEntry.attachments || []);
       }
     };
 
     fetchGalleryAttachments();
   }, [galleryEntry]);
 
+  const deleteAttachmentsFromStorage = async (entryId: string) => {
+    try {
+      const { data: attachments, error } = await supabase
+        .from('attachments')
+        .select('file_path')
+        .eq('entry_id', entryId);
+
+      if (error) {
+        console.error(`Error fetching attachments for entry ${entryId}:`, error);
+        return;
+      }
+      
+      if (!attachments || attachments.length === 0) return;
+
+      const paths = attachments.map(att => att.file_path).filter(Boolean) as string[];
+      if (paths.length > 0) {
+        const { error: storageError } = await supabase.storage
+          .from('triptracker-files')
+          .remove(paths);
+        
+        if (storageError) {
+          console.error(`Error removing files from storage for entry ${entryId}:`, storageError);
+        }
+      }
+    } catch (err) {
+      console.error(`Unexpected error in deleteAttachmentsFromStorage for entry ${entryId}:`, err);
+    }
+  };
+
   const tableData = useMemo(() => {
     let currentBalance = 0;
-    return ledger.entries.map(entry => {
+    return (ledger.entries || []).map(entry => {
       if (entry.type === 'in') currentBalance += entry.amount;
       else currentBalance -= entry.amount;
       return { ...entry, balance: currentBalance };
@@ -139,8 +191,8 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   }, [ledger.entries]);
 
   const stats = useMemo(() => {
-    const cashIn = ledger.entries.filter(e => e.type === 'in').reduce((sum, e) => sum + e.amount, 0);
-    const cashOut = ledger.entries.filter(e => e.type === 'out').reduce((sum, e) => sum + e.amount, 0);
+    const cashIn = (ledger.entries || []).filter(e => e.type === 'in').reduce((sum, e) => sum + e.amount, 0);
+    const cashOut = (ledger.entries || []).filter(e => e.type === 'out').reduce((sum, e) => sum + e.amount, 0);
     return { cashIn, cashOut, net: cashIn - cashOut };
   }, [ledger.entries]);
 
@@ -153,6 +205,10 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   const handleConfirmDelete = async () => {
     setIsDeleting(true);
     try {
+      for (const id of deleteIds) {
+        await deleteAttachmentsFromStorage(id);
+      }
+
       if (deleteIds.length === 1) {
         await onDeleteEntry(ledger.id, deleteIds[0]);
       } else {
@@ -178,15 +234,15 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === ledger.entries.length && ledger.entries.length > 0) {
+    if (selectedIds.size === (ledger.entries?.length || 0) && (ledger.entries?.length || 0) > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(ledger.entries.map(e => e.id)));
+      setSelectedIds(new Set((ledger.entries || []).map(e => e.id)));
     }
   };
 
   const moveEntry = (index: number, direction: 'up' | 'down') => {
-    const newEntries = [...ledger.entries];
+    const newEntries = [...(ledger.entries || [])];
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newEntries.length) return;
     [newEntries[index], newEntries[targetIndex]] = [newEntries[targetIndex], newEntries[index]];
@@ -194,16 +250,22 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
   };
 
   const handleExportPdf = async () => {
+    setIsDownloading(true);
+    setDownloadProgress(10);
+    
+    await new Promise(r => setTimeout(r, 400));
+    setDownloadProgress(40);
+
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
     
     let isFirstPage = true;
 
-    for (const entry of ledger.entries) {
+    for (const entry of (ledger.entries || [])) {
       if (entry.attachments && entry.attachments.length > 0) {
         for (const att of entry.attachments) {
-          const imgSrc = att.url || (att.file_path ? supabase.storage.from('triptracker-files').getPublicUrl(att.file_path).data.publicUrl : '');
+          const imgSrc = att.url || (att.file_path ? supabase.storage.from('triptracker-files').getPublicUrl(att.file_path).data?.publicUrl : '');
           
           if (imgSrc && (imgSrc.startsWith('data:image/') || imgSrc.startsWith('http'))) {
             if (!isFirstPage) doc.addPage();
@@ -230,11 +292,26 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
       }
     }
 
+    await new Promise(r => setTimeout(r, 400));
+    setDownloadProgress(80);
+
     doc.save(`${ledger.name.replace(/\s+/g, '_')}_Attachments.pdf`);
-    setIsReportsOpen(false);
+    
+    setDownloadProgress(100);
+    setTimeout(() => {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+      setIsReportsOpen(false);
+    }, 600);
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
+    setIsDownloading(true);
+    setDownloadProgress(20);
+
+    await new Promise(r => setTimeout(r, 500));
+    setDownloadProgress(90);
+
     const headers = ['Date', 'Details', 'Category', 'Mode', 'Cash In', 'Cash Out'];
     const rows = tableData.map(e => [
       formatDate(e.dateTime),
@@ -262,7 +339,13 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
     link.href = url;
     link.download = `${ledger.name}.csv`;
     link.click();
-    setIsReportsOpen(false);
+    
+    setDownloadProgress(100);
+    setTimeout(() => {
+      setIsDownloading(false);
+      setDownloadProgress(0);
+      setIsReportsOpen(false);
+    }, 600);
   };
 
   return (
@@ -336,7 +419,7 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
                 <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
                   <th className="px-6 py-4 w-12 text-center">
                     <button type="button" onClick={toggleSelectAll} className="p-1">
-                      {selectedIds.size === ledger.entries.length && ledger.entries.length > 0 ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5" />}
+                      {selectedIds.size === (ledger.entries?.length || 0) && (ledger.entries?.length || 0) > 0 ? <CheckSquare className="w-5 h-5 text-blue-600" /> : <Square className="w-5 h-5" />}
                     </button>
                   </th>
                   <th className="px-6 py-4">Date & Time</th>
@@ -437,8 +520,34 @@ const LedgerDetails: React.FC<LedgerDetailsProps> = ({
         </div>
       </Modal>
 
-      {/* Gallery Modal */}
       <GalleryModal isOpen={!!galleryEntry} onClose={() => setGalleryEntry(null)} entry={galleryEntry} processedAttachments={galleryAttachments} />
+
+      {isDownloading && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-300 px-6">
+          <div className="bg-white dark:bg-slate-800 p-10 rounded-[2.5rem] shadow-2xl w-full max-w-sm flex flex-col items-center gap-6">
+            <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/30 rounded-3xl flex items-center justify-center text-blue-600">
+               <Loader2 className="w-10 h-10 animate-spin" />
+            </div>
+            <div className="text-center space-y-2">
+              <h3 className="text-2xl font-black text-slate-900 dark:text-white">Downloading...</h3>
+              <p className="text-slate-400 font-bold text-sm">Preparing your financial records.</p>
+            </div>
+            
+            <div className="w-full space-y-3">
+              <div className="flex justify-between items-center text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
+                <span>Progress</span>
+                <span>{Math.round(downloadProgress)}%</span>
+              </div>
+              <div className="w-full h-3 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden border border-slate-200 dark:border-slate-600 shadow-inner">
+                <div 
+                  className="h-full bg-blue-600 transition-all duration-500 ease-out shadow-[0_0_15px_rgba(37,99,235,0.4)]"
+                  style={{ width: `${downloadProgress}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -462,17 +571,31 @@ const SummaryCard: React.FC<{ title: string; amount: number; color: 'green' | 'r
   );
 };
 
+/**
+ * Gallery Modal with object-contain for main viewer and thumbnails
+ * Requirement: Images must show EXACTLY as uploaded without cropping
+ * Fix: Ensure zoom and rotation reset to 1 and 0 on open/image change to guarantee normal fit view.
+ */
 const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entry | null; processedAttachments: Attachment[] }> = ({ isOpen, onClose, entry, processedAttachments }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
 
+  // Reset state whenever the modal opens or a different entry is selected
+  useEffect(() => {
+    if (isOpen) {
+      setActiveIndex(0);
+      setZoom(1);
+      setRotation(0);
+    }
+  }, [isOpen, entry?.id]);
+
   if (!isOpen || !entry) return null;
 
-  const currentAttachments = processedAttachments.length > 0 ? processedAttachments : entry.attachments;
-  if (!currentAttachments.length) return null;
+  const currentAttachments = (processedAttachments || []);
+  if (!currentAttachments || !currentAttachments.length) return null;
 
-  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 3));
+  const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.25, 4));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.25, 0.5));
   const handleRotate = () => setRotation(prev => (prev + 90) % 360);
 
@@ -480,6 +603,18 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
     setZoom(1);
     setRotation(0);
     onClose();
+  };
+
+  const nextImage = () => {
+    setActiveIndex((prev) => (prev + 1) % currentAttachments.length);
+    setZoom(1);
+    setRotation(0);
+  };
+
+  const prevImage = () => {
+    setActiveIndex((prev) => (prev - 1 + currentAttachments.length) % currentAttachments.length);
+    setZoom(1);
+    setRotation(0);
   };
 
   return (
@@ -496,23 +631,35 @@ const GalleryModal: React.FC<{ isOpen: boolean; onClose: () => void; entry: Entr
         </div>
       </div>
 
-      <div className="w-full h-full flex flex-col items-center justify-center p-4 overflow-hidden">
+      <div className="w-full h-full flex flex-col items-center justify-center p-4 overflow-hidden relative">
+        {currentAttachments.length > 1 && (
+          <>
+            <button onClick={prevImage} className="absolute left-6 z-[110] p-4 text-white/50 hover:text-white transition-colors">
+               <ArrowLeft className="w-8 h-8" />
+            </button>
+            <button onClick={nextImage} className="absolute right-6 z-[110] p-4 text-white/50 hover:text-white transition-colors">
+               <ChevronRight className="w-8 h-8" />
+            </button>
+          </>
+        )}
+
         <div 
-          className="transition-transform duration-300 ease-out cursor-grab active:cursor-grabbing"
-          style={{ transform: `scale(${zoom}) rotate(${rotation}deg)` }}
+          className="transition-transform duration-300 ease-out cursor-grab active:cursor-grabbing max-w-full max-h-full flex items-center justify-center"
+          style={{ transform: `scale(${zoom}) rotate(${rotation}deg)`, width: '100%', height: '100%' }}
         >
-          {/* STEP 2: Use AttachmentImage for consistent preview rendering (strictly .url) */}
+          {/* Main Viewer - Use object-contain and ensure parent constraints */}
           <AttachmentImage 
             att={currentAttachments[activeIndex]} 
-            className="max-w-[90vw] max-h-[80vh] object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)]" 
+            className="max-w-full max-h-full object-contain rounded shadow-[0_0_50px_rgba(0,0,0,0.5)]" 
             alt="Attachment" 
           />
         </div>
 
+        {/* Re-added Thumbnails */}
         <div className="absolute bottom-8 flex gap-3 overflow-x-auto max-w-[90%] p-3 bg-white/5 rounded-2xl backdrop-blur-md border border-white/10 scrollbar-hide">
           {currentAttachments.map((att, idx) => (
-            <button key={att.id} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
-              <AttachmentImage att={att} className="w-full h-full object-cover" alt="" />
+            <button key={att?.id || idx} type="button" onClick={() => { setActiveIndex(idx); setZoom(1); setRotation(0); }} className={`w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0 transition-all ${idx === activeIndex ? 'border-blue-500 scale-110 shadow-lg' : 'border-transparent opacity-40 hover:opacity-100'}`}>
+              <AttachmentImage att={att} className="w-full h-full object-contain" alt="" />
             </button>
           ))}
         </div>
@@ -528,7 +675,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
   const [isLoadingCats, setIsLoadingCats] = useState(true);
   const [isSavingCategory, setIsSavingCategory] = useState(false);
 
-  // The base categories required by the user
   const baseCategories = ['Food', 'Rent', 'Utilities', 'Transport', 'Advance'];
 
   const [formData, setFormData] = useState({
@@ -547,22 +693,19 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
   const [attachments, setAttachments] = useState<Attachment[]>(initialData?.attachments || []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  /**
-   * STEP 1: For the editing form, ensure existing attachments have generated public URLs.
-   */
   useEffect(() => {
     const processInitialAttachments = async () => {
       if (initialData?.id && initialData.attachments && initialData.attachments.length > 0) {
         const processed = await Promise.all(initialData.attachments.map(async (att) => {
-          if (att.file_path && !att.url) {
+          if (att?.file_path && !att.url) {
             const { data } = supabase.storage
               .from('triptracker-files')
               .getPublicUrl(att.file_path);
-            return { ...att, url: data.publicUrl };
+            return { ...att, url: data?.publicUrl || '' };
           }
           return att;
         }));
-        setAttachments(processed);
+        setAttachments(processed.filter(Boolean) as Attachment[]);
       }
     };
     processInitialAttachments();
@@ -578,13 +721,10 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
 
       if (error) throw error;
 
-      // Extract names from DB
       const dbNames = (data || []).map(c => c.name);
       
-      // Combine base categories with database categories and ensure uniqueness
       const mergedSet = new Set([...baseCategories, ...dbNames]);
       
-      // Legacy protection: If the entry being edited has a category not in the set, add it
       if (initialData?.category && !mergedSet.has(initialData.category)) {
         mergedSet.add(initialData.category);
       }
@@ -595,12 +735,10 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
       if (autoSelectName) {
         setFormData(prev => ({ ...prev, category: autoSelectName }));
       } else if (!formData.category && !initialData?.category) {
-        // Default to the first base category if no selection exists
         setFormData(prev => ({ ...prev, category: baseCategories[0] }));
       }
     } catch (err) {
       console.error("Error fetching categories:", err);
-      // Even on error, ensure base categories are visible
       setCategoriesList(baseCategories);
       if (!formData.category && !initialData?.category) {
         setFormData(prev => ({ ...prev, category: baseCategories[0] }));
@@ -623,7 +761,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
       const { data: userData } = await supabase.auth.getUser();
       const userId = userData.user?.id;
       
-      // Check if it already exists (case-insensitive)
       const exists = categoriesList.some(c => c.toLowerCase() === normalizedName.toLowerCase());
       
       if (exists) {
@@ -635,7 +772,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
           .insert([{ name: normalizedName, user_id: userId }]);
 
         if (error) throw error;
-        // Re-fetch all and auto-select the new one
         await fetchCategories(normalizedName);
       }
     } catch (err: any) {
@@ -646,25 +782,58 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
     }
   };
 
-  const handleFiles = (files: FileList | File[]) => {
-    const filesArray = Array.from(files);
-    filesArray.forEach((file: File) => {
-      if (!file.type.startsWith('image/')) return;
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          const base64Data = event.target?.result as string;
-          setAttachments(prev => [...prev, { 
-            id: Math.random().toString(36).substr(2, 9), 
-            file_name: file.name, 
-            data: base64Data, 
-            url: base64Data, // Set url for unsaved preview to satisfy STEP 2 strictly
-            file_type: file.type 
-          }]);
-        }
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxWidth = 1200;
+
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
       };
+      reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  };
+
+  const handleFiles = async (files: FileList | File[]) => {
+    const filesArray = Array.from(files);
+    for (const file of filesArray) {
+      if (!file.type.startsWith('image/')) continue;
+      
+      try {
+        const compressedBase64 = await compressImage(file);
+        setAttachments(prev => [...prev, { 
+          id: Math.random().toString(36).substr(2, 9), 
+          file_name: file.name.replace(/\.[^/.]+$/, "") + ".jpg", 
+          data: compressedBase64, 
+          url: compressedBase64, 
+          file_type: 'image/jpeg' 
+        }]);
+      } catch (err) {
+        console.error("Image compression failed:", err);
+      }
+    }
   };
 
   const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
@@ -681,7 +850,6 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
     let finalCategory = formData.category;
     let finalMode = formData.mode;
 
-    // Handle the "Custom" case
     if (formData.category === 'Custom') {
       const normalized = customCategory.trim();
       if (!normalized) {
@@ -811,9 +979,8 @@ const EntryForm: React.FC<{ type: 'in' | 'out'; initialData?: Partial<Entry>; on
         {attachments.length > 0 && (
           <div className="grid grid-cols-5 gap-2 pt-2 animate-in fade-in slide-in-from-bottom-2">
             {attachments.map((att) => (
-              <div key={att.id} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group/item shadow-sm bg-slate-100 dark:bg-slate-700">
-                {/* Consistently using AttachmentImage for previews (strictly .url) */}
-                <AttachmentImage att={att} className="w-full h-full object-cover transition-transform group-hover/item:scale-110" alt="Preview" />
+              <div key={att?.id || Math.random()} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group/item shadow-sm bg-slate-100 dark:bg-slate-700">
+                <AttachmentImage att={att} className="w-full h-full object-contain transition-transform group-hover/item:scale-110" alt="Preview" />
                 <button 
                   type="button" 
                   onClick={(e) => { e.stopPropagation(); setAttachments(prev => prev.filter(a => a.id !== att.id)); }} 

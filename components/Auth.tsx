@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Theme } from '../types';
 import { Sun, Moon, Wallet, User as UserIcon, Mail, Lock, Loader2, ArrowLeft, CheckCircle2, ShieldCheck, AlertTriangle, Eye, EyeOff } from 'lucide-react';
@@ -44,6 +43,8 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
     setError(null);
     setSuccessMsg(null);
 
+    const trimmedEmail = email.trim();
+
     try {
       if (view === 'register' || view === 'update') {
         if (password.length < 6) {
@@ -55,34 +56,75 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
       }
 
       if (view === 'register') {
-        const { error: err } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: { data: { name }, emailRedirectTo: window.location.origin }
+        // 1. Detect existing user using signInWithPassword dummy check
+        // This is a reliable way to check for account existence in certain Supabase configurations
+        const { error: loginCheckError } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password: "dummy-password-check"
         });
-        if (err) throw err;
-        setSuccessMsg('Success! Please verify your email.');
+
+        // 2. If the call returns "Invalid login credentials", the email already exists in Auth
+        if (loginCheckError && loginCheckError.message.includes("Invalid login credentials")) {
+          throw new Error("User already exists. Please login instead.");
+        }
+
+        // 3. Only proceed if the user check suggests the account doesn't exist
+        const { error: signUpError } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password,
+          options: {
+            data: { name },
+            emailRedirectTo: window.location.origin
+          }
+        });
+
+        if (signUpError) {
+          // 4. Handle standard Supabase Auth conflict responses
+          if (
+            signUpError.message.includes("User already registered") ||
+            signUpError.message.includes("already registered") ||
+            signUpError.status === 422
+          ) {
+            throw new Error("User already exists. Please login instead.");
+          }
+          throw signUpError;
+        }
+
+        setSuccessMsg("Success! Please verify your email.");
       } 
       else if (view === 'login') {
-        const { error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (err) throw err;
+        const { error: err } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password
+        });
+
+        if (err) {
+          if (err.message.includes("Invalid login credentials")) {
+            throw new Error("Invalid email or password. Please try again.");
+          }
+          throw err;
+        }
       } 
       else if (view === 'forgot') {
-        if (!validateEmail(email.trim())) {
+        if (!validateEmail(trimmedEmail)) {
           throw new Error("Please enter a valid email address.");
         }
-        const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+
+        const { error: err } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
           redirectTo: resetRedirectUrl,
         });
+
         if (err) throw err;
-        setSuccessMsg('Password reset link sent to your email');
-      }
+        setSuccessMsg("Password reset link sent to your email");
+      } 
       else if (view === 'update') {
         const { error: err } = await supabase.auth.updateUser({
           password: password
         });
+
         if (err) throw err;
-        setSuccessMsg('Password updated successfully! Redirecting...');
+        setSuccessMsg("Password updated successfully! Redirecting...");
+
         setTimeout(() => {
           window.location.href = `${window.location.origin}/#/`;
         }, 2000);
@@ -105,7 +147,6 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
   return (
     <div className={`min-h-screen flex items-center justify-center p-4 transition-colors duration-500 relative overflow-hidden ${theme === 'dark' ? 'bg-slate-950' : 'bg-slate-50'}`}>
       
-      {/* Animated Background Blobs */}
       <div className="absolute top-0 -left-10 w-72 h-72 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob"></div>
       <div className="absolute top-0 -right-10 w-72 h-72 bg-indigo-400 rounded-full mix-blend-multiply filter blur-3xl opacity-10 animate-blob animation-delay-2000"></div>
 
@@ -116,11 +157,9 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         {theme === 'light' ? <Moon className="w-4 h-4 text-slate-700 group-hover:rotate-12 transition-transform" /> : <Sun className="w-4 h-4 text-yellow-400 group-hover:rotate-12 transition-transform" />}
       </button>
 
-      {/* Main Container - Reduced to 400px for a simpler "Small" feel as per reference image */}
       <div className="w-full max-w-[400px] z-10 animate-in fade-in zoom-in-95 duration-700 ease-out">
         <div className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-[1.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-100 dark:border-slate-800 overflow-hidden">
           
-          {/* Internal Padding reduced to match reference */}
           <div className="p-8 sm:p-10">
             <div className="flex flex-col items-center mb-8">
               <h1 className="text-3xl font-bold text-blue-500 dark:text-blue-400 tracking-tight text-center staggered-item" style={{ animationDelay: '100ms' }}>TripTracker</h1>

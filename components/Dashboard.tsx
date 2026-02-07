@@ -23,6 +23,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [newLedgerName, setNewLedgerName] = useState('');
+  const [ledgerError, setLedgerError] = useState('');
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -33,7 +34,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Step 3: Fetch entries joined with attachments table instead of reading JSONB
       const { data: ledgersData, error: ledgersError } = await supabase
         .from('ledgers')
         .select(`
@@ -55,16 +55,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           ...e,
           dateTime: e.date_time,
           attachments: (e.attachments || []).map((att: any) => {
-            // Requirement 2: Construct the public URL using getPublicUrl
+            if (!att) return null;
             const { data } = supabase.storage
               .from('triptracker-files')
               .getPublicUrl(att.file_path);
             
             return {
               ...att,
-              url: data.publicUrl
+              url: data?.publicUrl || ''
             };
-          })
+          }).filter(Boolean)
         })).sort((a: any, b: any) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
       }));
 
@@ -86,6 +86,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   }, [ledgers, searchQuery]);
 
   const processAttachment = async (att: Attachment, userId: string, entryId: string): Promise<Attachment> => {
+    if (!att) return att;
     if (att.data && att.data.startsWith('data:') && !att.file_path) {
       try {
         const res = await fetch(att.data);
@@ -117,8 +118,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           .single();
 
         if (dbError) throw dbError;
+        if (!dbData) throw new Error("Attachment created but no data returned.");
 
-        const { data: { publicUrl } } = supabase.storage
+        const { data } = supabase.storage
           .from('triptracker-files')
           .getPublicUrl(filePath);
 
@@ -126,7 +128,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
           ...att,
           id: dbData.id,
           file_path: filePath,
-          url: publicUrl,
+          url: data?.publicUrl || '',
           data: '' 
         };
       } catch (err) {
@@ -138,7 +140,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   };
 
   const handleCreateLedger = async () => {
-    if (!newLedgerName.trim()) return;
+    const trimmedName = newLedgerName.trim();
+    if (!trimmedName) return;
+
+    setLedgerError('');
+
+    // Validation: Check for unique ledger name (case-insensitive)
+    const isDuplicate = ledgers.some(l => l.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (isDuplicate) {
+      setLedgerError("Ledger already exists");
+      return;
+    }
 
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -147,13 +159,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       const { data, error } = await supabase
         .from('ledgers')
         .insert([{ 
-          name: newLedgerName,
+          name: trimmedName,
           user_id: userData.user.id
         }])
         .select()
         .single();
 
       if (error) throw error;
+      if (!data) throw new Error("Ledger created but no data returned.");
 
       const newLedger: Ledger = {
         id: data.id,
@@ -167,7 +180,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       setIsCreateModalOpen(false);
     } catch (err: any) {
       console.error('Create error:', err);
-      alert('Failed to create ledger: ' + err.message);
+      setLedgerError('Failed to create ledger: ' + err.message);
     }
   };
 
@@ -201,8 +214,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
   };
 
   const handleUpdateLedger = async (id: string, newName: string, createdAt?: number) => {
+    const trimmedName = newName.trim();
+    if (!trimmedName) return false;
+
+    // Validation: Check for unique ledger name excluding current ledger
+    const isDuplicate = ledgers.some(l => l.id !== id && l.name.trim().toLowerCase() === trimmedName.toLowerCase());
+    if (isDuplicate) {
+      alert("Ledger with this name already exists");
+      return false;
+    }
+
     try {
-      const updateData: any = { name: newName };
+      const updateData: any = { name: trimmedName };
       if (createdAt) updateData.created_at = new Date(createdAt).toISOString();
 
       const { error } = await supabase
@@ -212,9 +235,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
       if (error) throw error;
 
-      setLedgers(prev => prev.map(l => l.id === id ? { ...l, name: newName, createdAt: createdAt ?? l.createdAt } : l));
+      setLedgers(prev => prev.map(l => l.id === id ? { ...l, name: trimmedName, createdAt: createdAt ?? l.createdAt } : l));
+      return true;
     } catch (err: any) {
       console.error('Update error:', err);
+      return false;
     }
   };
 
@@ -240,6 +265,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         .single();
 
       if (entryError) throw entryError;
+      if (!entryData) throw new Error("Entry created but no data returned.");
 
       const entryId = entryData.id;
 
@@ -259,7 +285,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       setLedgers(prev => prev.map(l => 
         l.id === ledgerId ? { 
           ...l, 
-          entries: [...l.entries, newEntry].sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
+          entries: [...(l.entries || []), newEntry].sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
         } : l
       ));
     } catch (err: any) {
@@ -275,7 +301,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
       setLedgers(prev => prev.map(l => {
         if (l.id === ledgerId) {
-          return { ...l, entries: l.entries.filter(e => e.id !== entryId) };
+          return { ...l, entries: (l.entries || []).filter(e => e.id !== entryId) };
         }
         return l;
       }));
@@ -301,7 +327,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
 
       setLedgers(prev => prev.map(l => {
         if (l.id === ledgerId) {
-          return { ...l, entries: l.entries.filter(e => !entryIds.includes(e.id)) };
+          return { ...l, entries: (l.entries || []).filter(e => !entryIds.includes(e.id)) };
         }
         return l;
       }));
@@ -341,13 +367,13 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
       if (entryError) throw entryError;
 
       const processedAttachments = await Promise.all(
-        entry.attachments.map(att => processAttachment(att, userId, entry.id))
+        (entry.attachments || []).map(att => processAttachment(att, userId, entry.id))
       );
 
       setLedgers(prev => prev.map(l => 
         l.id === ledgerId ? { 
           ...l, 
-          entries: l.entries.map(e => e.id === entry.id ? { ...entry, attachments: processedAttachments } : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
+          entries: (l.entries || []).map(e => e.id === entry.id ? { ...entry, attachments: processedAttachments } : e).sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime()) 
         } : l
       ));
     } catch (err: any) {
@@ -479,7 +505,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
         )}
       </main>
 
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="Create New Ledger">
+      <Modal isOpen={isCreateModalOpen} onClose={() => { setIsCreateModalOpen(false); setLedgerError(''); }} title="Create New Ledger">
         <div className="p-8">
           <div className="mb-6">
             <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3">Ledger Name</label>
@@ -489,14 +515,23 @@ const Dashboard: React.FC<DashboardProps> = ({ user, theme, toggleTheme, onLogou
                 autoFocus
                 type="text" 
                 value={newLedgerName}
-                onChange={(e) => setNewLedgerName(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 rounded-2xl border-2 dark:bg-slate-900 dark:text-white border-slate-100 dark:border-slate-700 outline-none focus:border-blue-500 transition-all shadow-inner"
+                onChange={(e) => {
+                  setNewLedgerName(e.target.value);
+                  setLedgerError('');
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateLedger()}
+                className={`w-full pl-12 pr-4 py-4 rounded-2xl border-2 dark:bg-slate-900 dark:text-white outline-none transition-all shadow-inner ${ledgerError ? 'border-red-500 focus:border-red-500' : 'border-slate-100 dark:border-slate-700 focus:border-blue-500'}`}
                 placeholder="e.g. Monthly Savings"
               />
             </div>
+            {ledgerError && (
+              <p className="text-red-600 text-xs mt-2 font-bold flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1">
+                <span className="w-1 h-1 bg-red-600 rounded-full"></span> {ledgerError}
+              </p>
+            )}
           </div>
           <div className="flex gap-4">
-            <button onClick={() => setIsCreateModalOpen(false)} className="flex-1 px-4 py-4 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">Cancel</button>
+            <button onClick={() => { setIsCreateModalOpen(false); setLedgerError(''); }} className="flex-1 px-4 py-4 rounded-2xl border border-slate-200 dark:border-slate-700 font-bold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">Cancel</button>
             <button onClick={handleCreateLedger} className="flex-1 px-4 py-4 rounded-2xl bg-blue-600 text-white font-black shadow-xl shadow-blue-500/20 active:scale-95 transition-all">Create Ledger</button>
           </div>
         </div>
