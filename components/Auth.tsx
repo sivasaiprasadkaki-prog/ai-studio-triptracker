@@ -56,20 +56,8 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
       }
 
       if (view === 'register') {
-        // 1. Detect existing user using signInWithPassword dummy check
-        // This is a reliable way to check for account existence in certain Supabase configurations
-        const { error: loginCheckError } = await supabase.auth.signInWithPassword({
-          email: trimmedEmail,
-          password: "dummy-password-check"
-        });
-
-        // 2. If the call returns "Invalid login credentials", the email already exists in Auth
-        if (loginCheckError && loginCheckError.message.includes("Invalid login credentials")) {
-          throw new Error("User already exists. Please login instead.");
-        }
-
-        // 3. Only proceed if the user check suggests the account doesn't exist
-        const { error: signUpError } = await supabase.auth.signUp({
+        // Direct signup logic
+        const { data, error: signUpError } = await supabase.auth.signUp({
           email: trimmedEmail,
           password,
           options: {
@@ -79,7 +67,7 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         });
 
         if (signUpError) {
-          // 4. Handle standard Supabase Auth conflict responses
+          // Handle standard Supabase Auth conflict responses
           if (
             signUpError.message.includes("User already registered") ||
             signUpError.message.includes("already registered") ||
@@ -90,7 +78,14 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
           throw signUpError;
         }
 
-        setSuccessMsg("Success! Please verify your email.");
+        // Important: Supabase returns an empty identities array if the user already exists 
+        // and email confirmation is enabled (to prevent email enumeration).
+        if (data?.user?.identities && data.user.identities.length === 0) {
+          throw new Error("User already exists. Please login instead.");
+        }
+
+        // If we reach here, registration was successful (either user created or confirmation email sent)
+        setSuccessMsg("Registration successful! Please verify your email.");
       } 
       else if (view === 'login') {
         const { error: err } = await supabase.auth.signInWithPassword({
@@ -126,7 +121,7 @@ const Login: React.FC<LoginProps> = ({ theme, toggleTheme, initialView = 'login'
         setSuccessMsg("Password updated successfully! Redirecting...");
 
         setTimeout(() => {
-          window.location.href = `${window.location.origin}/#/`;
+          window.location.hash = '/';
         }, 2000);
       }
     } catch (err: any) {
